@@ -19,6 +19,8 @@ import vegaEmbed from "vega-embed";
 import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
 import { ToolCall, ServerContent } from "../../multimodal-live-types";
 import VoskComponent, { VoskRef } from '../vosk/VoskComponent';
+import LipSync, { LipSyncRef } from '../lipsync/LipSync';
+import SpeechStreamerComponent, { SpeechStreamerRef } from '../speech-streamer/SpeechStreamerComponent';
 
 const declaration: FunctionDeclaration = {
   name: "render_altair",
@@ -40,6 +42,8 @@ function AltairComponent() {
   const [jsonString, setJSONString] = useState<string>("");
   const { client, setConfig } = useLiveAPIContext();
   const voskRef = useRef<VoskRef>(null);
+  const lipSyncRef = useRef<LipSyncRef>(null);
+  const speechStreamerRef = useRef<SpeechStreamerRef>(null);
 
   useEffect(() => {
     setConfig({
@@ -98,14 +102,12 @@ function AltairComponent() {
 
   useEffect(() => {
     const onAudio = (data: ArrayBuffer) => {
-      // Səs datası
-      console.log("Audio data received");
 
-      if (voskRef.current) {
-        // Only log if connected to reduce console spam
-        if (voskRef.current.isConnected()) {
-          console.log("Sending audio to Vosk");
-        }
+      if (speechStreamerRef.current) {
+        speechStreamerRef.current.sendAudio(data);
+      }
+
+      if (voskRef.current && !voskRef.current.isConnected()) {
         voskRef.current.sendAudio(data);
       }
     };
@@ -149,7 +151,9 @@ function AltairComponent() {
     }
   }, [embedRef, jsonString]);
   return <> <div className="vega-embed" ref={embedRef} />
-  <VoskComponent ref={voskRef} /> {/* VoskComponent-i render edin */}</>;
+  <VoskComponent ref={voskRef} />
+  <LipSync ref={lipSyncRef} />
+  <SpeechStreamerComponent ref={speechStreamerRef} /></>;
 }
 
 export const Altair = memo(AltairComponent);
