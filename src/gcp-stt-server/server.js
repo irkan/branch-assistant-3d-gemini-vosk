@@ -1,3 +1,5 @@
+require('dotenv-flow').config(); // .env fayllarını yükləmək üçün əlavə edildi
+
 // server.js
 const express = require('express');
 const http = require('http');
@@ -9,7 +11,7 @@ const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
 const speechClient = new speech.SpeechClient({
-    keyFilename: 'authentication.json'
+    apiKey: process.env.REACT_APP_GEMINI_API_KEY // dotenv-flow ilə yüklənmiş dəyişəndən oxuyur
 });
 
 console.log("Node.js WebSocket serveri (avtomatik axın idarəetməsi ilə) başladılır...");

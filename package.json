@@ -31,7 +31,9 @@
   },
   "scripts": {
     "start-https": "HTTPS=true react-scripts start",
-    "start": "concurrently -k \"react-scripts start\" \"node src/gcp-stt-server/server.js\" \"wait-on http://localhost:3001\"",
+    "start": "react-scripts start",
+    "start-server": "node src/gcp-stt-server/server.js",
+    "start-server-with-frontend": "concurrently -k \"react-scripts start\" \"node src/gcp-stt-server/server.js\" \"wait-on http://localhost:3001\"",
     "build": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"

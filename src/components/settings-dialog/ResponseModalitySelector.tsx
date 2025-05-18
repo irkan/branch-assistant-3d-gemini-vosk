@@ -3,8 +3,8 @@ import Select from "react-select";
 import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
 
 const responseOptions = [
-  { value: "audio", label: "audio" },
-  { value: "text", label: "text" },
+  { value: "audio", label: "səs" },
+  { value: "text", label: "mətn" },
 ];
 
 export default function ResponseModalitySelector() {
@@ -30,7 +30,7 @@ export default function ResponseModalitySelector() {
 
   return (
     <div className="select-group">
-      <label htmlFor="response-modality-selector">Response modality</label>
+      <label htmlFor="response-modality-selector">Cavab Formatı</label>
       <Select
         id="response-modality-selector"
         className="react-select"

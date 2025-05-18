@@ -96,12 +96,10 @@ export function Model(props: ThreeElements['group']) {
   
   useEffect(() => {
     const animationNames = Object.keys(actions)
-    console.log('Available animations:', animationNames)
     
     if (animationNames.length > 0) {
       const firstAnimation = actions[animationNames[0]]
-      if (firstAnimation) {
-        console.log('Playing animation:', animationNames[0])
+      if (firstAnimation) { 
         firstAnimation.reset().fadeIn(0.5).play()
       }
     }

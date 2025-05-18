@@ -101,13 +101,13 @@ export default function SettingsDialog() {
             <LanguageSelector />
           </div>
 
-          <h3>System Instructions</h3>
+          <h3>Sistem Promptu</h3>
           <textarea
             className="system"
             onChange={updateConfig}
             value={systemInstruction}
           />
-          <h4>Function declarations</h4>
+          <h4>Funksiya təsvirləri</h4>
           <div className="function-declarations">
             <div className="fd-rows">
               {functionDeclarations.map((fd, fdKey) => (

@@ -24,7 +24,7 @@ import SpeechStreamerComponent, { SpeechStreamerRef } from '../speech-streamer/S
 
 const declaration: FunctionDeclaration = {
   name: "render_altair",
-  description: "Displays an altair graph in json format.",
+  description: "Altair qrafikini JSON formatda göstər .",
   parameters: {
     type: SchemaType.OBJECT,
     properties: {

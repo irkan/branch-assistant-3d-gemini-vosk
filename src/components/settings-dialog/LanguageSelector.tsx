@@ -15,7 +15,7 @@ export default function LanguageSelector() {
 
   useEffect(() => {
     const languageCode =
-      config.generationConfig?.speechConfig?.language_code || "en-US";
+      config.generationConfig?.speechConfig?.language_code || "tr-TR";
     const languageOption = languageOptions.find(option => option.value === languageCode) || 
       { value: languageCode, label: languageCode };
     setSelectedOption(languageOption);
@@ -44,7 +44,7 @@ export default function LanguageSelector() {
 
   return (
     <div className="select-group">
-      <label htmlFor="language-selector">Language</label>
+      <label htmlFor="language-selector">Dil</label>
       <Select
         id="language-selector"
         className="react-select"

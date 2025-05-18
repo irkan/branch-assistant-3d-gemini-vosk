@@ -47,7 +47,7 @@ export default function VoiceSelector() {
 
   return (
     <div className="select-group">
-      <label htmlFor="voice-selector">Voice</label>
+      <label htmlFor="voice-selector">Səs</label>
       <Select
         id="voice-selector"
         className="react-select"

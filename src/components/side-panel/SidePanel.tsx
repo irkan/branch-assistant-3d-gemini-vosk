@@ -74,9 +74,9 @@ export default function SidePanel() {
   };
 
   return (
-    <div className={`side-panel ${open ? "open" : ""}`}>
+    <div className={`side-panel ${open ? "" : "open"}`}>
       <header className="top">
-        <h2>Console</h2>
+        <h2>İzləmə konsolu</h2>
         {open ? (
           <button className="opener" onClick={() => setOpen(false)}>
             <RiSidebarFoldLine color="#b4b8bb" />
@@ -117,8 +117,8 @@ export default function SidePanel() {
         />
         <div className={cn("streaming-indicator", { connected })}>
           {connected
-            ? `🔵${open ? " Streaming" : ""}`
-            : `⏸️${open ? " Paused" : ""}`}
+            ? `🔵${open ? " Səs Axını" : ""}`
+            : `⏸️${open ? " Dayandırılıb" : ""}`}
         </div>
       </div>
       <div className="side-panel-container" ref={loggerRef}>
@@ -146,14 +146,14 @@ export default function SidePanel() {
               hidden: textInput.length,
             })}
           >
-            Type&nbsp;something...
+            Mətn daxil edin...
           </span>
 
           <button
             className="send-button material-symbols-outlined filled"
             onClick={handleSubmit}
           >
-            send
+            yaz
           </button>
         </div>
       </div>
