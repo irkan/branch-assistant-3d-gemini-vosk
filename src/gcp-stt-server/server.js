@@ -23,14 +23,54 @@ wss.on('connection', (ws) => {
     let recognizeStream = null;
     let stopStreamTimer = null;
 
-    const requestConfig = {
-        encoding: 'LINEAR16',
-        sampleRateHertz: 16000,
-        languageCode: 'az-AZ',
-        enableWordTimeOffsets: true,
-        // model: 'default', 
-        // enableAutomaticPunctuation: true,
-    };
+        // Tez-tez istifadə olunan Azərbaycan sözləri üçün speechContexts
+        const commonAzerbaijaniWords = [
+            "salam", "sağ ol", "necəsən", "yaxşıyam", "çox sağ ol", "hə", "yox",
+            "bəli", "xeyr", "zəhmət olmasa", "bağışlayın", "problem deyil",
+            "bu gün", "sabah", "dünən", "indi", "sonra", "əla", "gözəl",
+            "beynəlxalq", "dünyanın", "dünya", "dünyada", "bank", "kömək",
+            "Azərbaycan", "Bakı", "kompüter", "internet", "mən", "sən", 
+            "o", "biz", "siz", "onlar", "bu", "müştəri", "kredit", 
+            "debet", "hesab", "kart", "bank kartı", "plastik kart", "depozit", 
+            "faiz", "valyuta", "məzənnə", "dollar", "avro", "manat", 
+            "əməliyyat", "elektron", "mobil", "avtomobil",
+            "internet", "filial", "atm", "posterminal", 
+            "komissiya", "balans", "transfer", "köçürmə", 
+            "iban", "swift", "ödəniş", "limit", "gecikmə", "gecikmə", 
+            "tarixçə", "reytinq", "təminat", "zamin", "girov", 
+            "ipoteka", "icarə", "lizinq", "təqdimat", "sənəd", "müraciət", 
+            "qəbul", "rədd", "hesabat", "risk", "təhlükəsizlik", "şifrə", 
+            "smstəsdiqi", "otp", "qazanc", "xərclər", "büdcə", "əməkhaqqı", 
+            "avtomatiködəniş", "çıxarış", "investisiya", 
+            "fond", "səhmlər", "bond", "dividend", "portfel", "təminat", "akkreditiv", 
+            "çek", "koorporativ", "fiziki", "hüquqi", "şəxs", 
+            "mərkəzi", "tənzimləmə", "audit", "lisenziya", "portfel", 
+            "idarəetmə", "təhlil", "maliyyə", "aktiv", "passiv", 
+            "kapital", "likvidlik", "proses", "müraciət", "Ayla", "ay", "gün",
+            "il", "saat", "dəqiqə", "saniyə", "həftə", "Azərbaycan Beynəlxalq Bankı",
+            "ABB", "tanıma", "narahat", "başa düşmə", "anlayıram", "doğru", "yanlış",
+            "səhv", "model", "bankomat", "ödəniş terminalı", "terminal", "ABB Mobile"
+        ];
+    
+        const requestConfig = {
+            encoding: 'LINEAR16',
+            sampleRateHertz: 16000,
+            languageCode: 'az-AZ', // Azərbaycan dili
+            enableWordTimeOffsets: true,
+            // model: 'default', // Ehtiyac olarsa, xüsusi bir model təyin edin
+            // enableAutomaticPunctuation: true,
+            speechContexts: [{
+                phrases: commonAzerbaijaniWords,
+                boost: 10 // Bu sözlərin tanınma ehtimalını artırmaq üçün (0-dan yuxarı dəyər)
+            }],
+            metadata: {
+                interactionType: 'DISCUSSION', // və ya 'VOICE_COMMAND', 'DISCUSSION'
+                originalMediaType: 'AUDIO',
+                recordingDeviceType: 'PC', // və ya 'SMARTPHONE', 'HEADSET'
+                // recordingDeviceName: 'My Custom Microphone', // İstəyə bağlı
+                audioTopic: 'Azərbaycan Beynəlxalq Bankına aid suallar və məsələlər. Bank müştəri ilə əlaqədar məsələlər. Bankda tez-tez istifadə olunan sözləri tanıyır. Bank terminləri.' // Audionun mövzusunu təsvir edir
+            }
+        };
 
     const streamingRequest = {
         config: requestConfig,

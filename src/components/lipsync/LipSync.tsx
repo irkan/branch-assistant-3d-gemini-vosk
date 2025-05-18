@@ -1,170 +1,134 @@
-import React, { useRef, useImperativeHandle, forwardRef, useEffect, useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 
-// Web Speech API type definitions
-interface SpeechRecognitionEvent extends Event {
-  results: SpeechRecognitionResultList;
-  resultIndex: number;
-  interpretation: any;
-}
-
-interface SpeechRecognitionError extends Event {
-  error: string;
-  message: string;
-}
-
-interface SpeechRecognition extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  abort(): void;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: ((event: SpeechRecognitionError) => void) | null;
-}
+const LIPSINC_CHAR_INTERVAL = 150; // Hər bir hərf üçün interval (ms)
 
 interface LipSyncProps {
-  onTranscript?: (text: string) => void;
-  enabled?: boolean;
+  transcriptionData: {
+    transcript: string;
+    isFinal: boolean;
+  } | null;
 }
 
-export interface LipSyncRef {
-  start: () => void;
-  stop: () => void;
-}
+const LipSync: React.FC<LipSyncProps> = ({ transcriptionData }) => {
+  const charQueueRef = useRef<string[]>([]); // Göstəriləcək simvolların aktiv növbəsi
+  const processedQueueRef = useRef<string[]>([]); // Artıq göstərilmiş simvolların növbəsi
+  const lastDataRef = useRef<LipSyncProps['transcriptionData']>(null);
+  const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-const LipSync = forwardRef<LipSyncRef, LipSyncProps>(({ onTranscript, enabled = false }, ref) => {
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const [isListening, setIsListening] = useState(false);
-
-  const initializeRecognition = () => {
-    if (!('webkitSpeechRecognition' in window)) {
-      console.error('Web Speech API is not supported in this browser.');
-      return null;
+  const clearAnimationInterval = useCallback(() => {
+    if (animationIntervalRef.current) {
+      clearInterval(animationIntervalRef.current);
+      animationIntervalRef.current = null;
     }
+  }, []);
 
-    const recognition = new (window as any).webkitSpeechRecognition();
-    recognitionRef.current = recognition;
+  const startCharAnimation = useCallback(() => {
+    clearAnimationInterval(); 
 
-    recognition.lang = 'az-AZ'; // Azerbaijani language
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const transcript = Array.from(event.results)
-        .map(result => result[0].transcript)
-        .join('');
-      
-      const resultTime = new Date().toLocaleTimeString('en-US', { 
-        hour12: false,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        fractionalSecondDigits: 3
-      });
-      console.log(`[${resultTime}] Səs tanıma nəticəsi:`, transcript);
-      
-      if (onTranscript) {
-        onTranscript(transcript);
-      }
-    };
-
-    recognition.onerror = (event: SpeechRecognitionError) => {
-      const errorTime = new Date().toLocaleTimeString('en-US', { 
-        hour12: false,
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        fractionalSecondDigits: 3
-      });
-      console.error(`[${errorTime}] Səs tanıma xətası:`, event.error);
-    };
-
-    recognition.onend = () => {
-      setIsListening(false);
-      // Səs tanıma dayandıqda avtomatik olaraq yenidən başlat
-      if (recognitionRef.current && enabled) {
-        const restartTime = new Date().toLocaleTimeString('en-US', { 
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          fractionalSecondDigits: 3
-        });
-        console.log(`[${restartTime}] Səs tanıma yenidən başladılır...`);
-        try {
-          recognitionRef.current.start();
-          setIsListening(true);
-        } catch (error) {
-          console.error('Səs tanımanı yenidən başlatmaq mümkün olmadı:', error);
+    if (charQueueRef.current.length > 0) { // Aktiv növbədə simvol varsa
+      animationIntervalRef.current = setInterval(() => {
+        if (charQueueRef.current.length > 0) {
+          const charToLog = charQueueRef.current.shift(); // Əvvəldən götür və sil
+          if (charToLog) { // undefined olmaması üçün yoxlama
+            processedQueueRef.current.push(charToLog); // İşlənmişlər növbəsinə at
+            console.log(
+              `👄 [Pull] '${charToLog}'`, 
+              {
+                activeQueue: [...charQueueRef.current],
+                activeQueueSize: charQueueRef.current.length,
+                processedQueue: [...processedQueueRef.current],
+                processedQueueSize: processedQueueRef.current.length
+              }
+            );
+          }
+        } else {
+          clearAnimationInterval();
+          if (lastDataRef.current?.isFinal && processedQueueRef.current.length > 0) {
+            console.log(`🏁 --- [LipSync] Son transkript üçün bütün hərflər göstərildi (${processedQueueRef.current.join('')}) ---`);
+          }
         }
+      }, LIPSINC_CHAR_INTERVAL);
+    } else {
+      if (lastDataRef.current?.isFinal && processedQueueRef.current.length > 0) {
+         console.log(`🏁 --- [LipSync] Son transkript üçün bütün hərflər göstərildi (aktiv növbə boş idi): ${processedQueueRef.current.join('')} ---`);
       }
-    };
+    }
+  }, [clearAnimationInterval]);
 
-    return recognition;
-  };
-
-  const start = () => {
-    if (!enabled) {
-      console.log('Səs tanıma deaktivdir');
+  const updateTranscriptQueue = useCallback((data: LipSyncProps['transcriptionData']) => {
+    console.log('[Push] updateTranscriptQueue çağırıldı, data:', data);
+    if (!data) {
+      charQueueRef.current = [];
+      processedQueueRef.current = []; 
+      lastDataRef.current = null;
+      clearAnimationInterval();
+      console.log('[Push] Data yoxdur, bütün növbələr təmizləndi.', 
+        {
+          activeQueue: [...charQueueRef.current],
+          activeQueueSize: charQueueRef.current.length,
+          processedQueue: [...processedQueueRef.current],
+          processedQueueSize: processedQueueRef.current.length
+        }
+      );
       return;
     }
 
-    if (!recognitionRef.current) {
-      const recognition = initializeRecognition();
-      if (recognition) {
-        try {
-          const startTime = new Date().toLocaleTimeString('en-US', { 
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            fractionalSecondDigits: 3
-          });
-          console.log(`[${startTime}] Səs tanıma başladı`);
-          recognition.start();
-          setIsListening(true);
-        } catch (error) {
-          console.error('Səs tanımanı başlatmaq mümkün olmadı:', error);
+    const { transcript: newText, isFinal: newIsFinal } = data;
+    const newChars = newText.split('');
+    const oldDataWasFinal = lastDataRef.current?.isFinal;
+    let updateReason = '';
+
+    if (newIsFinal) {
+      updateReason = 'Final transkript alındı';
+      processedQueueRef.current = []; 
+      charQueueRef.current = [];
+      newChars.forEach(char => charQueueRef.current.push(char));
+    } else {
+      if (oldDataWasFinal === true || !lastDataRef.current) {
+        updateReason = 'Yeni qismən cümlə başlanır (əvvəlki final idi və ya ilk data)';
+        processedQueueRef.current = []; 
+        charQueueRef.current = [];
+        newChars.forEach(char => charQueueRef.current.push(char));
+      } else {
+        const currentAnimatedPrefix = processedQueueRef.current.join('');
+        if (newText.startsWith(currentAnimatedPrefix)) {
+          updateReason = 'Qismən cümlə dəqiqləşdirilir/davam etdirilir';
+          charQueueRef.current = []; // Aktiv növbəni sıfırla
+          const remainingNewChars = newText.substring(currentAnimatedPrefix.length).split('');
+          remainingNewChars.forEach(char => charQueueRef.current.push(char));
+        } else {
+          updateReason = 'Qismən cümlə uyğun deyil, tamamilə yenilənir';
+          processedQueueRef.current = []; 
+          charQueueRef.current = [];
+          newChars.forEach(char => charQueueRef.current.push(char));
         }
       }
-    } else if (!isListening) {
-      try {
-        recognitionRef.current.start();
-        setIsListening(true);
-      } catch (error) {
-        console.error('Səs tanımanı başlatmaq mümkün olmadı:', error);
-      }
     }
-  };
-
-  const stop = () => {
-    if (recognitionRef.current && isListening) {
-      try {
-        recognitionRef.current.stop();
-        setIsListening(false);
-      } catch (error) {
-        console.error('Səs tanımanı dayandırmaq mümkün olmadı:', error);
+    console.log(
+      `[Push] Növbələr yeniləndi. Səbəb: ${updateReason}`,
+      {
+        activeQueue: [...charQueueRef.current],
+        activeQueueSize: charQueueRef.current.length,
+        processedQueue: [...processedQueueRef.current],
+        processedQueueSize: processedQueueRef.current.length,
+        newText
       }
-    }
-  };
+    );
+    lastDataRef.current = data;
+    startCharAnimation();
 
-  useImperativeHandle(ref, () => ({
-    start,
-    stop
-  }));
+  }, [startCharAnimation, clearAnimationInterval]);
 
-  // enabled prop-u dəyişdikdə səs tanımanı yenidən başlat və ya dayandır
   useEffect(() => {
-    if (enabled) {
-      start();
-    } else {
-      stop();
-    }
-  }, [enabled]);
+    updateTranscriptQueue(transcriptionData);
+    
+    return () => {
+      clearAnimationInterval();
+    };
+  }, [transcriptionData, updateTranscriptQueue, clearAnimationInterval]);
 
-  return null;
-});
+  return null; 
+};
 
-export default LipSync; 
-export { default as LipSync } from './LipSync'; 
+export default LipSync;
+

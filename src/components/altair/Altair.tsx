@@ -19,7 +19,7 @@ import vegaEmbed from "vega-embed";
 import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
 import { ToolCall, ServerContent } from "../../multimodal-live-types";
 import VoskComponent, { VoskRef } from '../vosk/VoskComponent';
-import LipSync, { LipSyncRef } from '../lipsync/LipSync';
+import SpeechRecognitionComponent, { SpeechRecognitionRef } from '../speech-recognition/SpeechRecognitionComponent';
 import SpeechStreamerComponent, { SpeechStreamerRef } from '../speech-streamer/SpeechStreamerComponent';
 
 const declaration: FunctionDeclaration = {
@@ -42,7 +42,7 @@ function AltairComponent() {
   const [jsonString, setJSONString] = useState<string>("");
   const { client, setConfig } = useLiveAPIContext();
   const voskRef = useRef<VoskRef>(null);
-  const lipSyncRef = useRef<LipSyncRef>(null);
+  const speechRecognitionRef = useRef<SpeechRecognitionRef>(null);
   const speechStreamerRef = useRef<SpeechStreamerRef>(null);
 
   useEffect(() => {
@@ -152,7 +152,7 @@ function AltairComponent() {
   }, [embedRef, jsonString]);
   return <> <div className="vega-embed" ref={embedRef} />
   <VoskComponent ref={voskRef} />
-  <LipSync ref={lipSyncRef} />
+  <SpeechRecognitionComponent ref={speechRecognitionRef} />
   <SpeechStreamerComponent ref={speechStreamerRef} /></>;
 }
 

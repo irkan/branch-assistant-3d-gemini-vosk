@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import LipSync from '../lipsync/LipSync'; // LipSync komponentini import edirik
 
 interface SpeechStreamerResponse {
   result?: {
@@ -29,7 +30,12 @@ const SpeechStreamerComponent = forwardRef<SpeechStreamerRef, {}>((props, ref) =
   const audioQueueRef = useRef<ArrayBuffer[]>([]);
   const processingRef = useRef(false);
 
-  // WebSocket bağlantısı yaratmaq
+  // LipSync komponentinə ötürmək üçün yeni state
+  const [latestTranscriptionForLipSync, setLatestTranscriptionForLipSync] = useState<{
+    transcript: string;
+    isFinal: boolean;
+  } | null>(null);
+
   const connectToSpeechStreamer = () => {
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       console.log('SpeechStreamer serverinə artıq qoşulub');
@@ -44,8 +50,6 @@ const SpeechStreamerComponent = forwardRef<SpeechStreamerRef, {}>((props, ref) =
       ws.onopen = () => {
         console.log('SpeechStreamer serverinə qoşuldu');
         setIsConnected(true);
-        
-        // Növbədə olan bütün audio məlumatlarını göndər
         processAudioQueue();
       };
 
@@ -54,17 +58,35 @@ const SpeechStreamerComponent = forwardRef<SpeechStreamerRef, {}>((props, ref) =
           const data: SpeechStreamerResponse = JSON.parse(event.data);
           
           if (data.result) {
-            console.log('✅ SpeechStreamer Tanınmış mətn:', data.text);
-            console.log('📊 SpeechStreamer Viseme məlumatları:', data.result);
+            console.log('✅ SpeechStreamer Tanınmış mətn (Köhnə format):', data.text);
+            console.log('📊 SpeechStreamer Viseme məlumatları (Köhnə format):', data.result);
             setVisemes(data.result);
             setTranscript(data.text || '');
+            setLatestTranscriptionForLipSync(null); // Köhnə formatda lipsync məlumatı yoxdur
+
           } else if (data.partial) {
-            console.log('🔄 SpeechStreamer Qismən tanınma:', data.partial);
+            console.log('🔄 SpeechStreamer Qismən tanınma (Köhnə format):', data.partial);
+            setTranscript(data.partial || '');
+            // Köhnə formatdakı qismən nəticəni də LipSync-ə göndərə bilərik (isFinal: false ilə)
+            setLatestTranscriptionForLipSync({
+              transcript: data.partial || "",
+              isFinal: false,
+            });
+
+          } else if (data.type === 'transcription' && typeof data.transcript === 'string') {
+            console.log('📩 SpeechStreamer SpeechStreamer cavabı (Yeni Format):', data);
+            setTranscript(data.transcript || ''); // Ümumi transkripti yeniləyirik
+            setLatestTranscriptionForLipSync({
+              transcript: data.transcript || "",
+              isFinal: !!data.isFinal,
+            });
           } else {
-            console.log('📩 SpeechStreamer SpeechStreamer cavabı:', data);  
+            console.log('📩 SpeechStreamer SpeechStreamer cavabı (Format təyin edilmədi və ya fərqli köhnə format):', data);
+            setLatestTranscriptionForLipSync(null); // Tanınmayan formatda lipsync məlumatı yoxdur
           }
         } catch (error) {
           console.error('SpeechStreamer cavabının təhlili zamanı xəta:', error);
+          setLatestTranscriptionForLipSync(null);
         }
       };
 
@@ -154,16 +176,10 @@ const SpeechStreamerComponent = forwardRef<SpeechStreamerRef, {}>((props, ref) =
         clearTimeout(reconnectTimeoutRef.current);
       }
     };
-  }, []);
+  }, []); // Boş dependency array, yalnız mount və unmount zamanı işləyir
 
   return (
-    <div>
-      {/* İstəyə görə tanınma nəticələrini göstərmək üçün UI elementləri */}
-      <div style={{ display: 'none' }}>
-        <div>SpeechStreamer bağlantısı: {isConnected ? 'Aktiv ✅' : 'Qırılıb ❌'}</div>
-        {transcript && <div>Tanınmış mətn: {transcript}</div>}
-      </div>
-    </div>
+      <LipSync transcriptionData={latestTranscriptionForLipSync} />
   );
 });
 
