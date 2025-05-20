@@ -21,7 +21,7 @@ import { ToolCall, ServerContent } from "../../multimodal-live-types";
 import VoskComponent, { VoskRef } from '../speech/vosk/VoskComponent';
 import SpeechRecognitionComponent, { SpeechRecognitionRef } from '../speech/speech-recognition/SpeechRecognitionComponent';
 import SpeechStreamerComponent, { SpeechStreamerRef } from '../speech/speech-streamer/SpeechStreamerComponent';
-import GladiaRtComponent, { GladiaRtRef } from '../speech/gladia_rt/GladiaRtComponent';
+import GladiaRtComponent, { GladiaRtRef } from '../speech/gladia/GladiaRtComponent';
 
 const declaration: FunctionDeclaration = {
   name: "render_altair",
@@ -160,7 +160,7 @@ function AltairComponent() {
   <VoskComponent ref={voskRef} />
   <SpeechRecognitionComponent ref={speechRecognitionRef} />
   <SpeechStreamerComponent ref={speechStreamerRef} />
-  <GladiaRtComponent ref={gladiaRtRef} showDebugInfo={true} autoStart={true} />
+  <GladiaRtComponent ref={gladiaRtRef} showDebugInfo={false} autoStart={true} />
   </>;
 }
 
