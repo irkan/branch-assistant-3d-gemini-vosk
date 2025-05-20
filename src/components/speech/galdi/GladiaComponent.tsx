@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import useGladiaProcessor from './useGladiaProcessor';
 import { StreamingConfig, StreamingAudioFormat } from '../../../lib/gladia/live/types';
 
@@ -52,35 +52,35 @@ const GladiaComponent = forwardRef<GladiaRef, GladiaComponentProps>((
   const [internalTranscript, setInternalTranscript] = useState('');
   const [isConnectedState, setIsConnectedState] = useState(false);
 
-  const handleFinalResult = (text: string) => {
+  const handleFinalResult = useCallback((text: string) => {
     setInternalTranscript(prev => prev + text + ' '); // Accumulate transcript
     if (onFinalResult) {
       onFinalResult(text);
     }
-  };
+  }, [onFinalResult]);
 
-  const handlePartialResult = (text: string) => {
+  const handlePartialResult = useCallback((text: string) => {
     // Placeholder: If you want to display partial results differently
     // setInternalTranscript(text); // Or append to a different state for partials
     if (onPartialResult) {
       onPartialResult(text);
     }
-  };
+  }, [onPartialResult]);
 
-  const handleConnect = () => {
+  const handleConnect = useCallback(() => {
     setIsConnectedState(true);
     if (onConnect) onConnect();
-  };
+  }, [onConnect]);
 
-  const handleDisconnect = () => {
+  const handleDisconnect = useCallback(() => {
     setIsConnectedState(false);
     if (onDisconnect) onDisconnect();
-  };
+  }, [onDisconnect]);
 
-  const handleError = (error: any) => {
+  const handleError = useCallback((error: any) => {
     console.error("GladiaComponent Error:", error);
     if (onError) onError(error);
-  }
+  }, [onError]);
 
   const gladiaProcessor = useGladiaProcessor(
     {

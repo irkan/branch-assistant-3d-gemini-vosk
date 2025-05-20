@@ -1,14 +1,21 @@
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { StreamingConfig, InitiateResponse, StreamingAudioFormat } from '../../../lib/gladia/live/types'; // Assuming types are accessible
 
+console.log("--- SCRIPT LOADED: useGladiaProcessor.ts ---"); // Log for script loading
+
 // Read Gladia Key - In a real app, this should be handled securely, perhaps from environment variables or a config service.
-const GLADIA_KEY = process.env.REACT_APP_GLADIA_API_KEY || "YOUR_GLADIA_KEY";
+const GLADIA_KEY_VALUE = process.env.REACT_APP_GLADIA_API_KEY || "YOUR_GLADIA_KEY_DEFAULT";
+console.log("--- useGladiaProcessor: Initial GLADIA_KEY_VALUE Check (at module scope):", GLADIA_KEY_VALUE);
+if (GLADIA_KEY_VALUE === "YOUR_GLADIA_KEY_DEFAULT") {
+    console.warn("--- useGladiaProcessor: WARNING! Gladia API Key is using the default placeholder. Please set REACT_APP_GLADIA_KEY in your .env file.");
+}
+
 const GLADIA_API_URL = "https://api.gladia.io";
 const RECONNECT_DELAY_MS = 5000; // 5 seconds for reconnection attempts
 const MAX_RECONNECT_ATTEMPTS = 5; // Maximum number of reconnection attempts
 
-if (typeof GLADIA_KEY !== "string") {
-  throw new Error("set REACT_APP_GLADIA_API_KEY in .env");
+if (typeof GLADIA_KEY_VALUE !== "string") {
+  throw new Error("set REACT_APP_GLADIA_KEY in .env");
 }
 
 export interface GladiaProcessorHandle {
@@ -36,6 +43,8 @@ const useGladiaProcessor = (
     audioFormat?: Partial<StreamingAudioFormat>;
   } = {}
 ): GladiaProcessorHandle => {
+  console.log("--- HOOK ENTRY: useGladiaProcessor() called ---"); // Log for hook entry
+
   const wsRef = useRef<WebSocket | null>(null);
   const audioBufferRef = useRef<Float32Array[]>([]); // Buffer for audio data before sending
   const isProcessingRef = useRef(options.autoStart || false);
@@ -51,30 +60,32 @@ const useGladiaProcessor = (
     audioFormat: userAudioFormat,
   } = options;
 
+  console.log("--- useGladiaProcessor: Options received:", { sampleRate, autoStart, userStreamingConfig, userAudioFormat });
+
   const reconnectAttemptsRef = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isConnectingRef = useRef(false); // Prevents multiple concurrent connection attempts
   const isUnmountingRef = useRef(false); // Tracks if the component is unmounting
 
-  const audioFormatBase: StreamingAudioFormat = {
-    encoding: "wav/pcm", // Or other supported formats
-    bit_depth: 16,
-    sample_rate: sampleRate as 8000 | 16000 | 32000 | 44100 | 48000, // Ensure this matches Gladia's allowed values
-    channels: 1,
-    ...userAudioFormat,
-  };
+  const audioFormatBase = useMemo((): StreamingAudioFormat => {
+    console.log("--- useGladiaProcessor: Recalculating audioFormatBase ---");
+    return {
+      encoding: "wav/pcm",
+      bit_depth: 16,
+      sample_rate: sampleRate as 8000 | 16000 | 32000 | 44100 | 48000,
+      channels: 1,
+      ...(userAudioFormat || {}),
+    };
+  }, [sampleRate, userAudioFormat]);
 
-  const gladiaConfig: StreamingConfig = {
-    language_config: {
-      languages: ["az", "en", "tr", "ru"], // Default languages
-      code_switching: true,
-    },
-    realtime_processing: {
-      words_accurate_timestamps: true, // Example, adjust as needed
-    },
-    // model: "solaria-1", // Example, you might want to configure this
-    ...userStreamingConfig,
-  };
+  const gladiaConfig = useMemo((): StreamingConfig => {
+    console.log("--- useGladiaProcessor: Recalculating gladiaConfig ---");
+    return {
+      language_config: { languages: ["az", "en", "tr", "ru"], code_switching: true },
+      realtime_processing: { words_accurate_timestamps: true },
+      ...(userStreamingConfig || {}),
+    };
+  }, [userStreamingConfig]);
 
   const clearReconnectTimer = () => {
     if (reconnectTimeoutRef.current) {
@@ -84,8 +95,9 @@ const useGladiaProcessor = (
   };
   
   const cleanupWebSocket = () => {
+    console.log("--- FN CALL: cleanupWebSocket() ---");
     if (wsRef.current) {
-      console.log("Cleaning up existing WebSocket instance.");
+      console.log("--- cleanupWebSocket: Cleaning up existing WebSocket instance. Current state:", wsRef.current.readyState);
       // Remove all event listeners to prevent them from firing on a closed/stale socket
       wsRef.current.onopen = null;
       wsRef.current.onmessage = null;
@@ -94,52 +106,71 @@ const useGladiaProcessor = (
 
       if (wsRef.current.readyState === WebSocket.OPEN) {
         try {
+          console.log("--- cleanupWebSocket: Sending stop_recording (OPEN state) ---");
           wsRef.current.send(JSON.stringify({ type: "stop_recording" }));
+          wsRef.current.close(1000, "Client disconnecting and cleaning up (OPEN state)");
         } catch (e) {
-            console.warn("Error sending stop_recording on cleanup (socket might be closing):", e);
+            console.warn("--- cleanupWebSocket: Error sending stop_recording (OPEN state):", e);
+            wsRef.current.close(1000, "Client disconnecting and cleaning up (OPEN state, error on send)");
         }
-        wsRef.current.close(1000, "Client disconnecting and cleaning up");
       } else if (wsRef.current.readyState === WebSocket.CONNECTING) {
-         wsRef.current.close(1000, "Client disconnecting during connection attempt");
+         console.log("--- cleanupWebSocket: Closing WebSocket in CONNECTING state ---");
+         wsRef.current.close(1000, "Client disconnecting during connection attempt (CONNECTING state)");
+      } else {
+        console.log("--- cleanupWebSocket: WebSocket not OPEN or CONNECTING, just nullifying ref. State:", wsRef.current.readyState);
       }
       wsRef.current = null;
     }
   };
 
   const connectWebSocket = useCallback(async () => {
-    if (isConnectingRef.current || (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) || isUnmountingRef.current) {
-      console.log('Connection attempt skipped: already connecting, connected, or unmounting.');
+    console.log("--- FN CALL: connectWebSocket() attempt ---");
+    if (isUnmountingRef.current) {
+        console.log("--- connectWebSocket: SKIPPED - component is unmounting.");
+        return;
+    }
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log('--- connectWebSocket: SKIPPED - already connected.');
       return;
     }
+    if (isConnectingRef.current) {
+        console.log("--- connectWebSocket: SKIPPED - a connection attempt is already in progress.");
+        return;
+    }
 
+    console.log("--- connectWebSocket: Proceeding with new connection attempt ---");
     isConnectingRef.current = true;
-    cleanupWebSocket(); // Clean up any old instance before creating a new one
+    
+    if (wsRef.current) {
+        console.warn("--- connectWebSocket: Found an existing wsRef.current before new attempt. This should ideally be cleaned up by previous lifecycle. State:", wsRef.current.readyState);
+        cleanupWebSocket(); // Ensure any very old instance is gone, though this might be redundant if lifecycle is perfect
+    }
+        
     clearReconnectTimer();
 
-    console.log('Initializing Gladia live session...');
+    console.log(`--- connectWebSocket: Initializing Gladia live session... API Key being used: ${GLADIA_KEY_VALUE.substring(0,5)}...`);
     try {
       const response = await fetch(`${GLADIA_API_URL}/v2/live`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-GLADIA-KEY": GLADIA_KEY },
+        headers: { "Content-Type": "application/json", "X-GLADIA-KEY": GLADIA_KEY_VALUE },
         body: JSON.stringify({ ...audioFormatBase, ...gladiaConfig }),
       });
 
-      if (isUnmountingRef.current) { // Check again in case of unmount during fetch
-        console.log("Unmounted during session initialization fetch. Aborting connection.");
+      if (isUnmountingRef.current) {
+        console.log("--- connectWebSocket: Unmounted during session initialization fetch. Aborting connection.");
         isConnectingRef.current = false;
         return;
       }
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`Gladia session initialization failed: ${response.status} - ${errorText}`);
+        console.error(`--- connectWebSocket: Gladia session initialization FAILED: ${response.status} - ${errorText}`);
         if (onError) onError(new Error(`Gladia init failed: ${errorText}`));
         setIsConnected(false);
         if (onDisconnect) onDisconnect();
         isConnectingRef.current = false;
-        if (response.status === 429 && !isUnmountingRef.current) { // Too Many Requests
-          console.warn("Max concurrent sessions reached. Will not attempt to reconnect immediately.");
-          // Optionally, you could schedule a much later retry or notify the user.
+        if (response.status === 429 && !isUnmountingRef.current) {
+          console.warn("--- connectWebSocket: Max concurrent sessions (429). Will NOT attempt to reconnect immediately.");
         } else if (!isUnmountingRef.current) {
           scheduleReconnect();
         }
@@ -147,21 +178,31 @@ const useGladiaProcessor = (
       }
 
       const initiateResponse: InitiateResponse = await response.json();
-      console.log('Gladia session initialized, connecting to WebSocket:', initiateResponse.url);
+      console.log('--- connectWebSocket: Gladia session initialized, connecting to WebSocket URL:', initiateResponse.url ? initiateResponse.url.split('=')[0]+'=TOKEN_HIDDEN' : 'NO_URL_RECEIVED');
+
+      if (!initiateResponse.url) {
+        console.error("--- connectWebSocket: CRITICAL - No WebSocket URL received from Gladia /v2/live response.");
+        isConnectingRef.current = false;
+        scheduleReconnect();
+        return;
+      }
 
       wsRef.current = new WebSocket(initiateResponse.url);
+      console.log("--- connectWebSocket: WebSocket instance created, attaching handlers. Current state (should be CONNECTING):", wsRef.current.readyState);
+
       wsRef.current.onopen = () => {
         if (isUnmountingRef.current) {
-            console.log("WebSocket opened but component is unmounting. Closing.");
+            console.log("--- WS_ONOPEN: WebSocket opened but component is unmounting. Closing.");
             wsRef.current?.close(1000, "Component unmounted during onopen");
+            // isConnectingRef should be false if onclose is triggered by this, or needs manual set.
             return;
         }
-        console.log('Gladia WebSocket connected');
+        console.log('--- WS_ONOPEN: Gladia WebSocket connected successfully!');
         setIsConnected(true);
         isConnectingRef.current = false;
-        reconnectAttemptsRef.current = 0; // Reset reconnect attempts on successful connection
+        reconnectAttemptsRef.current = 0;
         if (onConnect) onConnect();
-        if (autoStart || isProcessingRef.current) { // If autoStart or was processing before disconnect
+        if (autoStart || isProcessingRef.current) {
           isProcessingRef.current = true;
         }
       };
@@ -169,81 +210,87 @@ const useGladiaProcessor = (
       wsRef.current.onmessage = (event) => {
         if (isUnmountingRef.current) return;
         const message = JSON.parse(event.data.toString());
+        // console.log("--- WS_ONMESSAGE: Received:", message); // Can be too verbose
         if (message.type === "transcription" && message.transcription) {
           setTranscript(prev => prev + message.transcription + " ");
           if (onPartialResult && message.is_partial) onPartialResult(message.transcription);
-          else if (onFinalResult) onFinalResult(message.transcription); // Simplified: treat non-partial as final
+          else if (onFinalResult) onFinalResult(message.transcription);
         } else if (message.type === "error") {
-          console.error('Gladia WebSocket error message:', message.message);
+          console.error('--- WS_ONMESSAGE: Gladia WebSocket error message:', message.message);
           if (onError) onError(new Error(message.message));
         }
       };
 
       wsRef.current.onclose = (event) => {
-        if (isUnmountingRef.current) {
-            console.log("WebSocket closed because component is unmounting.");
-            return;
+        console.log(`--- WS_ONCLOSE: Gladia WebSocket disconnected (code: ${event.code}, reason: ${event.reason || 'N/A'}, wasClean: ${event.wasClean}) ---`);
+        if (isUnmountingRef.current && event.code !== 1000) {
+            console.log("--- WS_ONCLOSE: WebSocket closed while component unmounting (non-1000 code). isConnectingRef was:", isConnectingRef.current);
+        } else if (isUnmountingRef.current) {
+            console.log("--- WS_ONCLOSE: WebSocket closed cleanly during unmount.");
         }
-        console.log(`Gladia WebSocket disconnected (code: ${event.code}, reason: ${event.reason})`);
+
         setIsConnected(false);
-        isConnectingRef.current = false; // No longer actively trying to connect with this instance
-        // isProcessingRef.current = false; // debatable, user might want to resume
+        isConnectingRef.current = false; 
         if (onDisconnect) onDisconnect();
-        if (event.code !== 1000 && event.code !== 1005) { // 1000 is normal, 1005 is no status rcvd (often component unmount)
-          console.warn('Gladia WebSocket closed unexpectedly. Attempting to reconnect...');
+        
+        if (!isUnmountingRef.current && event.code !== 1000) { 
+          console.warn('--- WS_ONCLOSE: Gladia WebSocket closed unexpectedly. Attempting to reconnect...');
           scheduleReconnect();
         } else {
-          console.log("Gladia WebSocket closed normally or due to unmount, no reconnect scheduled.");
+          console.log("--- WS_ONCLOSE: WebSocket closed normally or due to unmount, no automatic reconnect scheduled.");
         }
       };
 
       wsRef.current.onerror = (errorEvent) => {
+        console.error('--- WS_ONERROR: Gladia WebSocket error event:', errorEvent.type, errorEvent);
         if (isUnmountingRef.current) return;
-        console.error('Gladia WebSocket error event:', errorEvent);
-        if (onError) onError(new Error("Gladia WebSocket error occurred."));
-        // onclose will usually follow, triggering reconnect logic if appropriate
+        if (onError) onError(new Error("Gladia WebSocket error event occurred."));
+        // onclose will usually follow and handle isConnectingRef and reconnection logic
       };
 
     } catch (error) {
+      console.error('--- connectWebSocket: CRITICAL ERROR during connection setup (outside fetch/response handling):', error);
       if (isUnmountingRef.current) return;
-      console.error('Error during Gladia connection setup:', error);
       if (onError) onError(error);
       setIsConnected(false);
       isConnectingRef.current = false;
       if (onDisconnect) onDisconnect();
       scheduleReconnect();
     }
-  }, [GLADIA_KEY, audioFormatBase, gladiaConfig, autoStart, onConnect, onDisconnect, onError, onFinalResult, onPartialResult]); // Removed isProcessingRef as it's mutable
+  }, [ GLADIA_KEY_VALUE, audioFormatBase, gladiaConfig, autoStart, onConnect, onDisconnect, onError, onFinalResult, onPartialResult]);
 
   const scheduleReconnect = () => {
     if (isUnmountingRef.current || reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
-      console.log("Max reconnect attempts reached or component unmounting. Will not reconnect.");
-      reconnectAttemptsRef.current = 0; // Reset for future manual attempts if any
+      console.log("--- scheduleReconnect: Max reconnect attempts reached or component unmounting. Will not reconnect.");
+      reconnectAttemptsRef.current = 0; 
       return;
     }
     reconnectAttemptsRef.current++;
-    const delay = Math.min(RECONNECT_DELAY_MS * Math.pow(2, reconnectAttemptsRef.current -1), 30000); // Exponential backoff up to 30s
-    console.log(`Scheduling reconnect attempt ${reconnectAttemptsRef.current} in ${delay / 1000}s...`);
-    clearReconnectTimer(); // Clear any existing timer
+    const delay = Math.min(RECONNECT_DELAY_MS * Math.pow(2, reconnectAttemptsRef.current -1), 30000);
+    console.log(`--- scheduleReconnect: Scheduling reconnect attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS} in ${delay / 1000}s...`);
+    clearReconnectTimer(); 
     reconnectTimeoutRef.current = setTimeout(() => {
       if (!isUnmountingRef.current) {
+          console.log("--- scheduleReconnect: Timeout reached, attempting connectWebSocket() ---");
           connectWebSocket();
       }
     }, delay);
   };
 
   useEffect(() => {
+    console.log("--- EFFECT: Main useEffect running. autoStart:", autoStart, "isUnmountingRef:", isUnmountingRef.current );
     isUnmountingRef.current = false;
-    if (autoStart) { // Connect on mount if autoStart is true
-        console.log("AutoStart is true, initiating connection.");
+    if (autoStart) {
+        console.log("--- EFFECT: autoStart is true, calling connectWebSocket() ---");
         connectWebSocket();
     }
 
     return () => {
-      console.log("useGladiaProcessor unmounting. Cleaning up...");
+      console.log("--- EFFECT CLEANUP: useGladiaProcessor unmounting/re-running. Cleaning up... ---");
       isUnmountingRef.current = true;
       clearReconnectTimer();
       cleanupWebSocket();
+      console.log("--- EFFECT CLEANUP: Cleanup complete. ---");
     };
   }, [connectWebSocket, autoStart]); // connectWebSocket is memoized, autoStart is a prop
 
@@ -280,34 +327,49 @@ const useGladiaProcessor = (
 
 
   const sendAudio = (audioData: ArrayBuffer) => {
+    // console.log("--- FN CALL: sendAudio() ---"); // Can be too verbose
     if (!isProcessingRef.current) {
-        // console.log("Not processing, discarding audio data for Gladia.");
+        // console.log("--- sendAudio: Not processing, discarding audio.");
         return;
     }
-    // For simplicity, directly send. Real-world might involve more sophisticated buffering.
-    processAndSendAudio(audioData);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      try {
+        wsRef.current.send(audioData);
+      } catch (error) {
+        console.error('--- sendAudio: Gladia audio sending error:', error);
+        if (onError) onError(error);
+      }
+    } else {
+      console.warn("--- sendAudio: WebSocket NOT OPEN, cannot send audio. Current state:", wsRef.current?.readyState, "isConnectingRef:", isConnectingRef.current);
+      if (!isConnected && !isConnectingRef.current && !isUnmountingRef.current) {
+        console.log("--- sendAudio: Attempting to reconnect as WebSocket is not open for sending audio.");
+        reconnectAttemptsRef.current = 0; 
+        connectWebSocket();
+      }
+    }
   };
 
   const startProcessing = () => {
-    console.log("startProcessing called.");
+    console.log("--- FN CALL: startProcessing() ---");
     isProcessingRef.current = true;
     if (!isConnected && !isConnectingRef.current && !isUnmountingRef.current) {
-      console.log("Not connected, initiating connection from startProcessing.");
-      reconnectAttemptsRef.current = 0; // Reset attempts
+      console.log("--- startProcessing: Not connected, calling connectWebSocket() ---");
+      reconnectAttemptsRef.current = 0; 
       connectWebSocket();
     } else if (isConnected) {
-        console.log("Already connected, processing will resume/continue.");
+        console.log("--- startProcessing: Already connected, processing will resume/continue.");
     }
   };
 
   const stopProcessing = () => {
-    console.log("stopProcessing called.");
+    console.log("--- FN CALL: stopProcessing() ---");
     isProcessingRef.current = false;
     // No need to send stop_recording here, cleanupWebSocket handles it on close/unmount.
     // If you specifically want to stop Gladia from processing further but keep connection open,
     // you might need a specific API message if Gladia supports it.
   };
 
+  console.log("--- HOOK END: useGladiaProcessor() returning handle ---");
   return {
     sendAudio,
     startProcessing,

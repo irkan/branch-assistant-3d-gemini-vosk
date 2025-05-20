@@ -21,7 +21,7 @@ import { ToolCall, ServerContent } from "../../multimodal-live-types";
 import VoskComponent, { VoskRef } from '../speech/vosk/VoskComponent';
 import SpeechRecognitionComponent, { SpeechRecognitionRef } from '../speech/speech-recognition/SpeechRecognitionComponent';
 import SpeechStreamerComponent, { SpeechStreamerRef } from '../speech/speech-streamer/SpeechStreamerComponent';
-import GladiaComponent, { GladiaRef } from '../speech/galdi/GladiaComponent';
+import GladiaRtComponent, { GladiaRtRef } from '../speech/gladia_rt/GladiaRtComponent';
 
 const declaration: FunctionDeclaration = {
   name: "render_altair",
@@ -45,7 +45,7 @@ function AltairComponent() {
   const voskRef = useRef<VoskRef>(null);
   const speechRecognitionRef = useRef<SpeechRecognitionRef>(null);
   const speechStreamerRef = useRef<SpeechStreamerRef>(null);
-  const gladiaRef = useRef<GladiaRef>(null);
+  const gladiaRtRef = useRef<GladiaRtRef>(null);
 
   useEffect(() => {
     setConfig({
@@ -113,8 +113,8 @@ function AltairComponent() {
         voskRef.current.sendAudio(data);
       }
 
-      if (gladiaRef.current) {
-        gladiaRef.current.sendAudio(data);
+      if (gladiaRtRef.current) {
+        gladiaRtRef.current.sendAudio(data);
       }
     };
 
@@ -160,7 +160,7 @@ function AltairComponent() {
   <VoskComponent ref={voskRef} />
   <SpeechRecognitionComponent ref={speechRecognitionRef} />
   <SpeechStreamerComponent ref={speechStreamerRef} />
-  <GladiaComponent ref={gladiaRef} showDebugInfo={true} />
+  <GladiaRtComponent ref={gladiaRtRef} showDebugInfo={true} autoStart={true} />
   </>;
 }
 
