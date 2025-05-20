@@ -18,9 +18,10 @@ import { useEffect, useRef, useState, memo } from "react";
 import vegaEmbed from "vega-embed";
 import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
 import { ToolCall, ServerContent } from "../../multimodal-live-types";
-import VoskComponent, { VoskRef } from '../vosk/VoskComponent';
-import SpeechRecognitionComponent, { SpeechRecognitionRef } from '../speech-recognition/SpeechRecognitionComponent';
-import SpeechStreamerComponent, { SpeechStreamerRef } from '../speech-streamer/SpeechStreamerComponent';
+import VoskComponent, { VoskRef } from '../speech/vosk/VoskComponent';
+import SpeechRecognitionComponent, { SpeechRecognitionRef } from '../speech/speech-recognition/SpeechRecognitionComponent';
+import SpeechStreamerComponent, { SpeechStreamerRef } from '../speech/speech-streamer/SpeechStreamerComponent';
+import GladiaComponent, { GladiaRef } from '../speech/galdi/GladiaComponent';
 
 const declaration: FunctionDeclaration = {
   name: "render_altair",
@@ -44,6 +45,7 @@ function AltairComponent() {
   const voskRef = useRef<VoskRef>(null);
   const speechRecognitionRef = useRef<SpeechRecognitionRef>(null);
   const speechStreamerRef = useRef<SpeechStreamerRef>(null);
+  const gladiaRef = useRef<GladiaRef>(null);
 
   useEffect(() => {
     setConfig({
@@ -110,6 +112,10 @@ function AltairComponent() {
       if (voskRef.current && !voskRef.current.isConnected()) {
         voskRef.current.sendAudio(data);
       }
+
+      if (gladiaRef.current) {
+        gladiaRef.current.sendAudio(data);
+      }
     };
 
     const onContent = (content: ServerContent) => {
@@ -153,7 +159,9 @@ function AltairComponent() {
   return <> <div className="vega-embed" ref={embedRef} />
   <VoskComponent ref={voskRef} />
   <SpeechRecognitionComponent ref={speechRecognitionRef} />
-  <SpeechStreamerComponent ref={speechStreamerRef} /></>;
+  <SpeechStreamerComponent ref={speechStreamerRef} />
+  <GladiaComponent ref={gladiaRef} showDebugInfo={true} />
+  </>;
 }
 
 export const Altair = memo(AltairComponent);

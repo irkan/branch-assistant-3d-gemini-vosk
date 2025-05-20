@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
-import LipSync from '../lipsync/LipSync'; // LipSync komponentini import edirik
+import LipSync from '../../lipsync/LipSync'; // LipSync komponentini import edirik
 
 interface WordInfo {
   word: string;

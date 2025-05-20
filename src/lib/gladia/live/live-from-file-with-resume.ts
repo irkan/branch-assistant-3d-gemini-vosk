@@ -7,33 +7,31 @@ import {
 } from "./helpers";
 import { InitiateResponse, StreamingConfig } from "./types";
 
-export class GladiaStreamer {}
-
 const gladiaApiUrl = "https://api.gladia.io";
 const gladiaKey = readGladiaKey();
 
 const filepath = "../data/anna-and-sasha-16000.wav";
 const config: StreamingConfig = {
   language_config: {
-    languages: ["az", "tr", "ru", "en"],
+    languages: ["es", "ru", "en", "fr"],
     code_switching: true,
   },
 };
 
-export async function initLiveSession(filePathToProcess: string, streamingConfig: StreamingConfig): Promise<InitiateResponse> {
+async function initLiveSession(): Promise<InitiateResponse> {
   const response = await fetch(`${gladiaApiUrl}/v2/live`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "X-GLADIA-KEY": gladiaKey,
     },
-    body: JSON.stringify({ ...getAudioFileFormat(filePathToProcess), ...streamingConfig }),
+    body: JSON.stringify({ ...getAudioFileFormat(filepath), ...config }),
   });
   if (!response.ok) {
     console.error(
       `${response.status}: ${(await response.text()) || response.statusText}`,
     );
-    throw new Error(`Failed to initiate Gladia session: ${response.status}`);
+    process.exit(response.status);
   }
 
   return await response.json();
@@ -62,12 +60,12 @@ function initWebSocketClient({ url }: InitiateResponse) {
 
     socket.addEventListener("error", function (error) {
       console.error(error);
+      process.exit(1);
     });
 
     socket.addEventListener("close", async ({ code, reason }) => {
       if (code === 1000 || stopRecording) {
-        console.log('WebSocket normal bağlandı və ya qeyd dayandırıldı.');
-        return;
+        process.exit(0);
       } else {
         console.log(">>>>> Lost connection with websocket");
         socket?.removeAllListeners();
@@ -115,7 +113,7 @@ function initWebSocketClient({ url }: InitiateResponse) {
 }
 
 async function start() {
-  const initiateResponse = await initLiveSession(filepath, config);
+  const initiateResponse = await initLiveSession();
 
   const client = initWebSocketClient(initiateResponse);
 
@@ -135,6 +133,10 @@ async function start() {
 
   // We can start the recording without waiting for the connection to be open
   // since the client buffers the audio
+
+  console.log();
+  console.log("################ Begin session ################");
+  console.log();
 
   recorder.start();
 
