@@ -21,6 +21,7 @@ import {
 } from "../lib/multimodal-live-client";
 import { LiveConfig } from "../multimodal-live-types";
 import { AudioStreamer } from "../lib/audio-streamer";
+import { GladiaStreamer } from "../lib/gladia/live/live-from-file-with-resume"
 import { audioContext } from "../lib/utils";
 import VolMeterWorket from "../lib/worklets/vol-meter";
 

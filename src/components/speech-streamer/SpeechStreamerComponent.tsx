@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import LipSync from '../lipsync/LipSync'; // LipSync komponentini import edirik
 
+interface WordInfo {
+  word: string;
+  startTime: string;
+  endTime: string;
+}
+
 interface SpeechStreamerResponse {
   result?: {
     word: string;
@@ -12,7 +18,7 @@ interface SpeechStreamerResponse {
   partial?: string;
   type?: string;
   transcript?: string;
-  words?: any[];
+  words?: WordInfo[];
   isFinal?: boolean;
 }
 
@@ -34,6 +40,7 @@ const SpeechStreamerComponent = forwardRef<SpeechStreamerRef, {}>((props, ref) =
   const [latestTranscriptionForLipSync, setLatestTranscriptionForLipSync] = useState<{
     transcript: string;
     isFinal: boolean;
+    words?: WordInfo[];
   } | null>(null);
 
   const connectToSpeechStreamer = () => {
@@ -57,6 +64,11 @@ const SpeechStreamerComponent = forwardRef<SpeechStreamerRef, {}>((props, ref) =
         try {
           const data: SpeechStreamerResponse = JSON.parse(event.data);
           
+          // Add a detailed log for transcription type messages
+          if (data.type === 'transcription') {
+            console.log('RAW TRANSCRIPTION DATA:', JSON.stringify(data, null, 2));
+          }
+
           if (data.result) {
             console.log('✅ SpeechStreamer Tanınmış mətn (Köhnə format):', data.text);
             console.log('📊 SpeechStreamer Viseme məlumatları (Köhnə format):', data.result);
@@ -71,6 +83,7 @@ const SpeechStreamerComponent = forwardRef<SpeechStreamerRef, {}>((props, ref) =
             setLatestTranscriptionForLipSync({
               transcript: data.partial || "",
               isFinal: false,
+              words: data.words,
             });
 
           } else if (data.type === 'transcription' && typeof data.transcript === 'string') {
@@ -79,6 +92,7 @@ const SpeechStreamerComponent = forwardRef<SpeechStreamerRef, {}>((props, ref) =
             setLatestTranscriptionForLipSync({
               transcript: data.transcript || "",
               isFinal: !!data.isFinal,
+              words: data.words,
             });
           } else {
             console.log('📩 SpeechStreamer SpeechStreamer cavabı (Format təyin edilmədi və ya fərqli köhnə format):', data);

@@ -1,131 +1,97 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback } from 'react';
 
-const LIPSINC_CHAR_INTERVAL = 150; // Hər bir hərf üçün interval (ms)
+interface WordInfo {
+  word: string;
+  startTime: string;
+  endTime: string;
+}
 
 interface LipSyncProps {
   transcriptionData: {
     transcript: string;
     isFinal: boolean;
+    words?: WordInfo[];
   } | null;
 }
 
+const LIPSINC_INTERVAL_MS = 100; // Intervalı sabit olaraq təyin edirik
+
 const LipSync: React.FC<LipSyncProps> = ({ transcriptionData }) => {
-  const charQueueRef = useRef<string[]>([]); // Göstəriləcək simvolların aktiv növbəsi
-  const processedQueueRef = useRef<string[]>([]); // Artıq göstərilmiş simvolların növbəsi
-  const lastDataRef = useRef<LipSyncProps['transcriptionData']>(null);
+  const simpleCharQueueRef = useRef<string[]>([]); // Gələn simvollar üçün növbə
+  const processedCharQueueRef = useRef<string[]>([]); // İşlənmiş simvollar üçün növbə
   const animationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const clearAnimationInterval = useCallback(() => {
     if (animationIntervalRef.current) {
       clearInterval(animationIntervalRef.current);
       animationIntervalRef.current = null;
+      console.log('Animasiya intervalı təmizləndi.');
     }
   }, []);
 
-  const startCharAnimation = useCallback(() => {
-    clearAnimationInterval(); 
+  // METOD 2: Növbədəki simvolları emal edən və animasiyanı idarə edən funksiya
+  const processQueuedCharacters = useCallback(() => {
+    clearAnimationInterval(); // Potensial çoxsaylı intervalların qarşısını almaq üçün əvvəlcə təmizləyirik
 
-    if (charQueueRef.current.length > 0) { // Aktiv növbədə simvol varsa
-      animationIntervalRef.current = setInterval(() => {
-        if (charQueueRef.current.length > 0) {
-          const charToLog = charQueueRef.current.shift(); // Əvvəldən götür və sil
-          if (charToLog) { // undefined olmaması üçün yoxlama
-            processedQueueRef.current.push(charToLog); // İşlənmişlər növbəsinə at
-            console.log(
-              `👄 [Pull] '${charToLog}'`, 
-              {
-                activeQueue: [...charQueueRef.current],
-                activeQueueSize: charQueueRef.current.length,
-                processedQueue: [...processedQueueRef.current],
-                processedQueueSize: processedQueueRef.current.length
-              }
-            );
-          }
-        } else {
-          clearAnimationInterval();
-          if (lastDataRef.current?.isFinal && processedQueueRef.current.length > 0) {
-            console.log(`🏁 --- [LipSync] Son transkript üçün bütün hərflər göstərildi (${processedQueueRef.current.join('')}) ---`);
-          }
-        }
-      }, LIPSINC_CHAR_INTERVAL);
-    } else {
-      if (lastDataRef.current?.isFinal && processedQueueRef.current.length > 0) {
-         console.log(`🏁 --- [LipSync] Son transkript üçün bütün hərflər göstərildi (aktiv növbə boş idi): ${processedQueueRef.current.join('')} ---`);
-      }
-    }
-  }, [clearAnimationInterval]);
-
-  const updateTranscriptQueue = useCallback((data: LipSyncProps['transcriptionData']) => {
-    console.log('[Push] updateTranscriptQueue çağırıldı, data:', data);
-    if (!data) {
-      charQueueRef.current = [];
-      processedQueueRef.current = []; 
-      lastDataRef.current = null;
-      clearAnimationInterval();
-      console.log('[Push] Data yoxdur, bütün növbələr təmizləndi.', 
-        {
-          activeQueue: [...charQueueRef.current],
-          activeQueueSize: charQueueRef.current.length,
-          processedQueue: [...processedQueueRef.current],
-          processedQueueSize: processedQueueRef.current.length
-        }
-      );
+    if (simpleCharQueueRef.current.length === 0) {
+      console.log("Animasiya üçün 'simpleCharQueueRef' boşdur. Başladılmır.");
       return;
     }
 
-    const { transcript: newText, isFinal: newIsFinal } = data;
-    const newChars = newText.split('');
-    const oldDataWasFinal = lastDataRef.current?.isFinal;
-    let updateReason = '';
-
-    if (newIsFinal) {
-      updateReason = 'Final transkript alındı';
-      processedQueueRef.current = []; 
-      charQueueRef.current = [];
-      newChars.forEach(char => charQueueRef.current.push(char));
-    } else {
-      if (oldDataWasFinal === true || !lastDataRef.current) {
-        updateReason = 'Yeni qismən cümlə başlanır (əvvəlki final idi və ya ilk data)';
-        processedQueueRef.current = []; 
-        charQueueRef.current = [];
-        newChars.forEach(char => charQueueRef.current.push(char));
-      } else {
-        const currentAnimatedPrefix = processedQueueRef.current.join('');
-        if (newText.startsWith(currentAnimatedPrefix)) {
-          updateReason = 'Qismən cümlə dəqiqləşdirilir/davam etdirilir';
-          charQueueRef.current = []; // Aktiv növbəni sıfırla
-          const remainingNewChars = newText.substring(currentAnimatedPrefix.length).split('');
-          remainingNewChars.forEach(char => charQueueRef.current.push(char));
-        } else {
-          updateReason = 'Qismən cümlə uyğun deyil, tamamilə yenilənir';
-          processedQueueRef.current = []; 
-          charQueueRef.current = [];
-          newChars.forEach(char => charQueueRef.current.push(char));
+    console.log('Simvol emalı animasiyası başladılır...');
+    animationIntervalRef.current = setInterval(() => {
+      if (simpleCharQueueRef.current.length > 0) {
+        const charToProcess = simpleCharQueueRef.current.shift(); 
+        if (charToProcess) {
+          processedCharQueueRef.current.push(charToProcess); 
+          console.log(
+            `👄 [Animasiya] Simvol köçürüldü: '${charToProcess}'`, 
+            {
+              qalanAktivQueue: [...simpleCharQueueRef.current],
+              qalanAktivQueueSize: simpleCharQueueRef.current.length,
+              islenmisQueue: [...processedCharQueueRef.current],
+              islenmisQueueSize: processedCharQueueRef.current.length
+            }
+          );
         }
+      } else {
+        console.log("🏁 'simpleCharQueueRef' boşaldı, animasiya dayandırılır.");
+        clearAnimationInterval();
       }
-    }
-    console.log(
-      `[Push] Növbələr yeniləndi. Səbəb: ${updateReason}`,
-      {
-        activeQueue: [...charQueueRef.current],
-        activeQueueSize: charQueueRef.current.length,
-        processedQueue: [...processedQueueRef.current],
-        processedQueueSize: processedQueueRef.current.length,
-        newText
-      }
-    );
-    lastDataRef.current = data;
-    startCharAnimation();
+    }, LIPSINC_INTERVAL_MS);
+  }, [clearAnimationInterval]);
 
-  }, [startCharAnimation, clearAnimationInterval]);
+  // METOD 1: Yeni transkript məlumatını qəbul edən və simpleCharQueueRef-ə əlavə edən funksiya
+  const ingestTranscriptData = useCallback((data: LipSyncProps['transcriptionData']) => {
+    if (data && data.transcript) {
+      const newChars = data.transcript.split('');
+      newChars.forEach(char => {
+        simpleCharQueueRef.current.push(char);
+      });
+      console.log("👄 [Növbə Güncəlləndi] 'simpleCharQueueRef' mövcud simvollar:", [...simpleCharQueueRef.current]);
+      
+      // Əgər animasiya intervalı aktiv deyilsə və növbədə simvol varsa, animasiyanı başlat
+      if (simpleCharQueueRef.current.length > 0) {
+        processQueuedCharacters();
+      }
+    } else if (!data) {
+      // Transkript datası null gələrsə
+      console.log('Transkript datası yoxdur. Hər iki növbə təmizlənir və animasiya dayandırılır.');
+      simpleCharQueueRef.current = [];
+      processedCharQueueRef.current = [];
+      clearAnimationInterval();
+    }
+  }, [processQueuedCharacters, clearAnimationInterval]); // processQueuedCharacters və clearAnimationInterval dependensiyalara əlavə edildi
 
   useEffect(() => {
-    updateTranscriptQueue(transcriptionData);
-    
+    console.log('LipSync tərəfindən alınan transcriptionData:', transcriptionData);
+    ingestTranscriptData(transcriptionData); // Birinci metodu çağırırıq
+
+    // Komponent unmount olduqda intervalı təmizlə
     return () => {
       clearAnimationInterval();
     };
-  }, [transcriptionData, updateTranscriptQueue, clearAnimationInterval]);
+  }, [transcriptionData, ingestTranscriptData, clearAnimationInterval]);
 
   return null; 
 };

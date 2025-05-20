@@ -26,10 +26,10 @@ wss.on('connection', (ws) => {
         // Tez-tez istifadə olunan Azərbaycan sözləri üçün speechContexts
         const commonAzerbaijaniWords = [
             "salam", "sağ ol", "necəsən", "necəsəniz", "sizə", "necə",
-            "yaxşıyam", "çox sağ ol", "hə", "yox",
+            "yaxşıyam", "çox sağ ol", "hə", "yox", "kömək", "edə bilərəm",
             "bəli", "xeyr", "zəhmət olmasa", "bağışlayın", "problem deyil",
             "bu gün", "sabah", "dünən", "indi", "sonra", "əla", "gözəl",
-            "beynəlxalq", "dünyanın", "dünya", "dünyada", "bank", "kömək",
+            "beynəlxalq", "dünyanın", "dünya", "dünyada", "bank",
             "Azərbaycan", "Bakı", "kompüter", "internet", "mən", "sən", 
             "o", "biz", "siz", "onlar", "bu", "müştəri", "kredit", 
             "debet", "hesab", "kart", "bank kartı", "plastik kart", "depozit", 
@@ -59,6 +59,7 @@ wss.on('connection', (ws) => {
             languageCode: 'az-AZ', // Azərbaycan dili
             enableWordTimeOffsets: true,
             enableWordConfidence: true, // Sözlərin etibarlılıq dərəcəsini aktivləşdirir
+            interimResults: true,
             model: 'default', // Ehtiyac olarsa, xüsusi bir model təyin edin
             useEnhanced: true, // Təkmil modeli aktivləşdirir (əgər mövcuddursa və dəstəklənirsə)
 

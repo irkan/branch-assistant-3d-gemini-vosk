@@ -103,7 +103,7 @@ function AltairComponent() {
   useEffect(() => {
     const onAudio = (data: ArrayBuffer) => {
 
-      if (speechStreamerRef.current) {
+      if (speechStreamerRef.current && !speechStreamerRef.current.isConnected()) {
         speechStreamerRef.current.sendAudio(data);
       }
 

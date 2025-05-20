@@ -28,7 +28,7 @@
     background: var(--Neutral-30);
   }
 
-  .react-select__option--is-focused: {
+  .react-select__option--is-focused:not(.react-select__option--is-selected) {
     background: var(--Neutral-30);
   }
 }

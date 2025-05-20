@@ -90,8 +90,8 @@ export default function SettingsDialog() {
           {connected && (
             <div className="connected-indicator">
               <p>
-                These settings can only be applied before connecting and will
-                override other settings.
+                Bu konfiqurasiyalar yalnız qoşulmadan əvvəl tətbiq oluna bilər və 
+                digər konfiqurasiyaların üzərindən yazacaq.
               </p>
             </div>
           )}
