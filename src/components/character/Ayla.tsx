@@ -4,12 +4,24 @@ Command: npx gltfjsx@6.5.3 public/model/ayla.glb -o src/components/character/Ayl
 */
 
 import * as THREE from 'three'
-import React, { useEffect } from 'react'
+import React, { useEffect, useImperativeHandle, forwardRef } from 'react'
 import { useGraph, ThreeElements } from '@react-three/fiber'
 import { useGLTF, useAnimations } from '@react-three/drei'
 import { GLTF, SkeletonUtils } from 'three-stdlib'
 
 type ActionName = 'Armature|6577333224704_TempMotion' | 'Key|6577333224704_TempMotion' | 'Key.002|6577333224704_TempMotion' | 'Key.001|6577333224704_TempMotion' | 'Key.003|6577333224704_TempMotion'
+
+export interface MorphTargetData {
+  morphTarget: string;
+  weight: string;
+}
+
+// AllowedMeshNames might not be needed externally anymore if the method always targets specific meshes
+// export type AllowedMeshNames = 'CC_Base_Body_2' | 'CC_Base_Body_9';
+
+export interface AylaModelRef {
+  updateMorphTargets: (targets: MorphTargetData[]) => void; // meshName parameter removed
+}
 
 interface GLTFAction extends THREE.AnimationClip {
   name: ActionName
@@ -27,14 +39,14 @@ type GLTFResult = GLTF & {
     Rolled_sleeves_shirt: THREE.SkinnedMesh
     Underwear_Bottoms: THREE.SkinnedMesh
     CC_Base_Body_1: THREE.SkinnedMesh
-    CC_Base_Body_2: THREE.SkinnedMesh
+    CC_Base_Body_2: THREE.SkinnedMesh // Target Mesh
     CC_Base_Body_3: THREE.SkinnedMesh
     CC_Base_Body_4: THREE.SkinnedMesh
     CC_Base_Body_5: THREE.SkinnedMesh
     CC_Base_Body_6: THREE.SkinnedMesh
     CC_Base_Body_7: THREE.SkinnedMesh
     CC_Base_Body_8: THREE.SkinnedMesh
-    CC_Base_Body_9: THREE.SkinnedMesh
+    CC_Base_Body_9: THREE.SkinnedMesh // Target Mesh
     CC_Base_Body_10: THREE.SkinnedMesh
     CC_Base_Body_11: THREE.SkinnedMesh
     CC_Base_Body_12: THREE.SkinnedMesh
@@ -80,7 +92,7 @@ type GLTFResult = GLTF & {
   animations: GLTFAction[]
 }
 
-export function Model(props: ThreeElements['group']) {
+export const Model = forwardRef<AylaModelRef, ThreeElements['group']>((props, ref) => {
   const group = React.useRef<THREE.Group>(null!)
   const { scene, animations: characterAnimations } = useGLTF('/model/ayla.glb')
   const { animations: motionAnimations } = useGLTF('/model/motion.glb')
@@ -93,6 +105,50 @@ export function Model(props: ThreeElements['group']) {
   const clone = React.useMemo(() => SkeletonUtils.clone(scene), [scene])
   const { nodes, materials } = useGraph(clone) as unknown as Pick<GLTFResult, 'nodes' | 'materials'>
   const { actions } = useAnimations(animations, group)
+  
+  useImperativeHandle(ref, () => ({
+    updateMorphTargets: (targets: MorphTargetData[]) => { // meshName parameter removed
+      console.log("updateMorphTargets: ", targets);
+      const targetMeshNames = ['CC_Base_Body_2', 'CC_Base_Body_9'] as const; // Apply to both meshes
+
+      targetMeshNames.forEach(meshName => {
+        const meshNode = nodes[meshName] as THREE.SkinnedMesh;
+
+        if (meshNode && meshNode.morphTargetDictionary && meshNode.morphTargetInfluences) {
+          // Optional: Reset all other morphs on this mesh to 0 first
+          // This ensures that only the specified morphs are active.
+          // If you want morphs to be additive without this, comment out the next loop.
+          for (let i = 0; i < meshNode.morphTargetInfluences.length; i++) {
+            meshNode.morphTargetInfluences[i] = 0;
+          }
+
+          targets.forEach(targetData => {
+            const morphTargetIndex = meshNode.morphTargetDictionary![targetData.morphTarget];
+            if (morphTargetIndex !== undefined) {
+              const weightValue = parseFloat(targetData.weight);
+              if (!isNaN(weightValue)) {
+                meshNode.morphTargetInfluences![morphTargetIndex] = weightValue;
+              } else {
+                console.warn(`[Ayla.tsx] Invalid weight value for morph target "${targetData.morphTarget}" on mesh "${meshName}": ${targetData.weight}`);
+              }
+            } else {
+              console.warn(`[Ayla.tsx] Morph target "${targetData.morphTarget}" not found in dictionary for mesh "${meshName}". Available targets:`, Object.keys(meshNode.morphTargetDictionary!));
+            }
+          });
+        } else {
+          let errorMsg = `[Ayla.tsx] Failed to update morph targets for mesh "${meshName}".`;
+          if (!meshNode) {
+              errorMsg += ` Mesh node not found. Available nodes: ${Object.keys(nodes).join(', ')}.`;
+          } else if (!meshNode.morphTargetDictionary) {
+              errorMsg += ` morphTargetDictionary not found.`;
+          } else if (!meshNode.morphTargetInfluences) {
+              errorMsg += ` morphTargetInfluences not found.`;
+          }
+          console.warn(errorMsg);
+        }
+      });
+    }
+  }));
   
   useEffect(() => {
     const animationNames = Object.keys(actions)
@@ -156,7 +212,9 @@ export function Model(props: ThreeElements['group']) {
       </group>
     </group>
   )
-}
+})
+
+Model.displayName = 'AylaModel'
 
 useGLTF.preload('/model/ayla.glb')
 useGLTF.preload('/model/motion.glb')

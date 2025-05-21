@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { useRef, useState } from "react";
+import { useRef, useState, ComponentProps } from "react";
 import "./App.scss";
 import { LiveAPIProvider } from "./contexts/LiveAPIContext";
 import SidePanel from "./components/side-panel/SidePanel";
@@ -22,6 +22,7 @@ import { Altair } from "./components/altair/Altair";
 import ControlTray from "./components/control-tray/ControlTray";
 import cn from "classnames";
 import Scene from "./components/scene/Scene";
+import { LipSync, LipSyncRef } from "./components/lipsync/LipSync";
 
 const API_KEY = process.env.REACT_APP_GEMINI_API_KEY as string;
 if (typeof API_KEY !== "string") {
@@ -37,6 +38,7 @@ function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   // either the screen capture, the video or null, if null we hide it
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
+  const lipSyncRef = useRef<LipSyncRef>(null);
 
   return (
     <div className="App">
@@ -46,9 +48,11 @@ function App() {
           <div className="main-content">
             <div className="main-app-area">
               {/* APP goes here */}
-              <Altair />
+              <Altair lipSyncRef={lipSyncRef} />
               <div className="full-canvas-container">
-                <Scene />
+                <Scene>
+                  <LipSync ref={lipSyncRef} />
+                </Scene>
               </div>
               <video
                 className={cn("stream", {

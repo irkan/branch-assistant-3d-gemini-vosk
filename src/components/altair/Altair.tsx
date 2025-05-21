@@ -22,6 +22,7 @@ import VoskComponent, { VoskRef } from '../speech/vosk/VoskComponent';
 import SpeechRecognitionComponent, { SpeechRecognitionRef } from '../speech/speech-recognition/SpeechRecognitionComponent';
 import SpeechStreamerComponent, { SpeechStreamerRef } from '../speech/speech-streamer/SpeechStreamerComponent';
 import GladiaRtComponent, { GladiaRtRef } from '../speech/gladia/GladiaRtComponent';
+import { LipSyncRef } from "../lipsync/LipSync";
 
 const declaration: FunctionDeclaration = {
   name: "render_altair",
@@ -39,7 +40,11 @@ const declaration: FunctionDeclaration = {
   },
 };
 
-function AltairComponent() {
+interface AltairComponentProps {
+  lipSyncRef: React.RefObject<LipSyncRef>;
+}
+
+function AltairComponent({ lipSyncRef }: AltairComponentProps) {
   const [jsonString, setJSONString] = useState<string>("");
   const { client, setConfig } = useLiveAPIContext();
   const voskRef = useRef<VoskRef>(null);
@@ -160,7 +165,7 @@ function AltairComponent() {
   <VoskComponent ref={voskRef} />
   <SpeechRecognitionComponent ref={speechRecognitionRef} />
   <SpeechStreamerComponent ref={speechStreamerRef} />
-  <GladiaRtComponent ref={gladiaRtRef} showDebugInfo={true} autoStart={true} />
+  <GladiaRtComponent ref={gladiaRtRef} lipSyncRef={lipSyncRef} showDebugInfo={true} autoStart={true} />
   </>;
 }
 

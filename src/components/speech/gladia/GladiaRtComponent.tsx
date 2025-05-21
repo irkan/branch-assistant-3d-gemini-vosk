@@ -1,4 +1,6 @@
-import React, { forwardRef, useImperativeHandle, useEffect, useCallback } from 'react';
+import React, { forwardRef, useImperativeHandle, useEffect, useCallback, useRef } from 'react';
+import { LipSyncRef } from '../../lipsync/LipSync';
+
 import useGladiaRt, {
     GladiaRtCallbacks,
     GladiaRtOptions,
@@ -11,6 +13,7 @@ export interface GladiaRtComponentProps extends GladiaRtOptions, GladiaRtCallbac
     showDebugInfo?: boolean; 
     style?: React.CSSProperties;
     className?: string;
+    lipSyncRef: React.RefObject<LipSyncRef>;
 }
 
 export interface GladiaRtRef {
@@ -38,6 +41,7 @@ const GladiaRtComponent = forwardRef<GladiaRtRef, GladiaRtComponentProps>((
         showDebugInfo = false,
         style,
         className,
+        lipSyncRef,
     },
     ref
 ) => {
@@ -46,12 +50,16 @@ const GladiaRtComponent = forwardRef<GladiaRtRef, GladiaRtComponentProps>((
         if (showDebugInfo) {
             console.log(`GladiaRtComponent: Transcript (${isFinal ? 'Final' : 'Partial'}): ${transcript}`);
             if (words && words.length > 0) {
-                console.log("GladiaRtComponent: Word Timestamps (JSON):");
-                console.log(JSON.stringify(words, null, 2));
+                console.log("GladiaRtComponent: Word Timestamps (JSON):", JSON.stringify(words, null, 2));
+                if (lipSyncRef && lipSyncRef.current) {
+                    lipSyncRef.current.proccessLipSyncData(words);
+                } else {
+                    console.warn("GladiaRtComponent: lipSyncRef is not available to process lip sync data.");
+                }
             }
         }
         if (onTranscript) onTranscript(transcript, isFinal, words);
-    }, [onTranscript, showDebugInfo]);
+    }, [onTranscript, showDebugInfo, lipSyncRef]);
 
     const handleError = useCallback((error: Error) => {
         if (showDebugInfo) {
@@ -106,7 +114,7 @@ const GladiaRtComponent = forwardRef<GladiaRtRef, GladiaRtComponentProps>((
     }));
 
     // This component itself might not render much, or just debug info.
-    return (<></>);
+    return null;
 });
 
 GladiaRtComponent.displayName = 'GladiaRtComponent';
