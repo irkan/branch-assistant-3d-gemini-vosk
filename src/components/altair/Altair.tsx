@@ -160,7 +160,7 @@ function AltairComponent() {
   <VoskComponent ref={voskRef} />
   <SpeechRecognitionComponent ref={speechRecognitionRef} />
   <SpeechStreamerComponent ref={speechStreamerRef} />
-  <GladiaRtComponent ref={gladiaRtRef} showDebugInfo={false} autoStart={true} />
+  <GladiaRtComponent ref={gladiaRtRef} showDebugInfo={true} autoStart={true} />
   </>;
 }
 

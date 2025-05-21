@@ -2,7 +2,8 @@ import React, { forwardRef, useImperativeHandle, useEffect, useCallback } from '
 import useGladiaRt, {
     GladiaRtCallbacks,
     GladiaRtOptions,
-    GladiaRtHandle as HookHandle
+    GladiaRtHandle as HookHandle,
+    GladiaWordTimestamp
 } from './useGladiaRt';
 
 export interface GladiaRtComponentProps extends GladiaRtOptions, GladiaRtCallbacks {
@@ -41,11 +42,15 @@ const GladiaRtComponent = forwardRef<GladiaRtRef, GladiaRtComponentProps>((
     ref
 ) => {
 
-    const handleTranscript = useCallback((transcript: string, isFinal: boolean) => {
+    const handleTranscript = useCallback((transcript: string, isFinal: boolean, words?: GladiaWordTimestamp[]) => {
         if (showDebugInfo) {
             console.log(`GladiaRtComponent: Transcript (${isFinal ? 'Final' : 'Partial'}): ${transcript}`);
+            if (words && words.length > 0) {
+                console.log("GladiaRtComponent: Word Timestamps (JSON):");
+                console.log(JSON.stringify(words, null, 2));
+            }
         }
-        if (onTranscript) onTranscript(transcript, isFinal);
+        if (onTranscript) onTranscript(transcript, isFinal, words);
     }, [onTranscript, showDebugInfo]);
 
     const handleError = useCallback((error: Error) => {

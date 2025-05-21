@@ -13,11 +13,17 @@ if (GLADIA_API_KEY === "YOUR_GLADIA_API_KEY_DEFAULT") {
     console.warn("GladiaRt: WARNING! Gladia API Key is using the default placeholder. Please set REACT_APP_GLADIA_API_KEY in your .env file for the component to work.");
 }
 
-//console.log("GladiaRt Hook Loaded. API Key Starts With:", GLADIA_API_KEY.substring(0, 5));
+console.log("GladiaRt Hook Loaded. API Key Starts With:", GLADIA_API_KEY.substring(0, 5));
 
+export interface GladiaWordTimestamp {
+    word: string;
+    start_time: number;
+    end_time: number;
+    confidence?: number; // Optional, if provided by API
+}
 
 export interface GladiaRtCallbacks {
-    onTranscript?: (transcript: string, isFinal: boolean) => void;
+    onTranscript?: (transcript: string, isFinal: boolean, words?: GladiaWordTimestamp[]) => void;
     onError?: (error: Error) => void;
     onConnected?: () => void;
     onDisconnected?: (reason?: string) => void;
@@ -100,12 +106,12 @@ const useGladiaRt = (
 
     const closeExistingSocket = useCallback((code?: number, reason?: string) => {
         if (socketRef.current) {
-            //console.log(`GladiaRt: Closing existing WebSocket (state: ${socketRef.current.readyState}). Code: ${code}, Reason: ${reason}`);
+            console.log(`GladiaRt: Closing existing WebSocket (state: ${socketRef.current.readyState}). Code: ${code}, Reason: ${reason}`);
             // Prevent onclose handler from triggering reconnection if this is a deliberate close
             if (socketRef.current.onclose) {
                 const originalOnClose = socketRef.current.onclose;
                 socketRef.current.onclose = (event) => {
-                    //console.log("GladiaRt: Deliberate socket close, original onclose temporarily bypassed for this event.");
+                    console.log("GladiaRt: Deliberate socket close, original onclose temporarily bypassed for this event.");
                     // @ts-ignore
                     originalOnClose.call(socketRef.current, event); // Call original but reconnection might be skipped based on flags
                 };
@@ -118,9 +124,9 @@ const useGladiaRt = (
 
     const connectWebSocket = useCallback(() => {
         if (!webSocketUrlRef.current || isConnectingRef.current || !componentMountedRef.current) {
-            //console.log(`GladiaRt: WebSocket connection skipped. URL: ${!!webSocketUrlRef.current}, Connecting: ${isConnectingRef.current}, Mounted: ${componentMountedRef.current}`);
+            console.log(`GladiaRt: WebSocket connection skipped. URL: ${!!webSocketUrlRef.current}, Connecting: ${isConnectingRef.current}, Mounted: ${componentMountedRef.current}`);
             if (!webSocketUrlRef.current && componentMountedRef.current && !isSessionExplicitlyStoppedRef.current) {
-                //console.log("GladiaRt: No WebSocket URL, attempting to initiate session again.");
+                console.log("GladiaRt: No WebSocket URL, attempting to initiate session again.");
                 // This implies the initial session failed or URL was lost. Try re-initiating.
                 // Be cautious with this to avoid loops if /live also fails repeatedly.
                 // initiateSession(); // Let's be careful here, might be better to let reconnect handle it if URL was never set
@@ -128,11 +134,11 @@ const useGladiaRt = (
             return;
         }
         if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-            //console.log("GladiaRt: WebSocket already open.");
+            console.log("GladiaRt: WebSocket already open.");
             return;
         }
 
-        //console.log("GladiaRt: Attempting to connect to WebSocket:", webSocketUrlRef.current.split('=')[0] + '=TOKEN_HIDDEN' + "");
+        console.log("GladiaRt: Attempting to connect to WebSocket:", webSocketUrlRef.current.split('=')[0] + '=TOKEN_HIDDEN' + "");
         isConnectingRef.current = true;
         
         // Clean up any old socket before creating a new one
@@ -143,11 +149,11 @@ const useGladiaRt = (
 
         ws.onopen = () => {
             if (!componentMountedRef.current) {
-                //console.log("GladiaRt: WS opened, but component unmounted. Closing.");
+                console.log("GladiaRt: WS opened, but component unmounted. Closing.");
                 ws.close(1000, "Component unmounted");
                 return;
             }
-            //console.log("GladiaRt: WebSocket connected successfully!");
+            console.log("GladiaRt: WebSocket connected successfully!");
             setIsConnected(true);
             isConnectingRef.current = false;
             reconnectAttemptsRef.current = 0;
@@ -159,14 +165,15 @@ const useGladiaRt = (
             if (!componentMountedRef.current) return;
             try {
                 const message = JSON.parse(event.data.toString());
-                // //console.log("GladiaRt: WS Message:", message); // DEBUG
+                // console.log("GladiaRt: WS Message:", message); // DEBUG
                 if (message.type === 'transcript') {
                     const text = message.data?.utterance?.text || message.transcription || ''; // Adapt to actual structure
                     const isFinal = message.data?.is_final !== undefined ? message.data.is_final : (message.type === 'transcript' && !message.is_partial); // Heuristic for final
-                    
+                    const words = message.data?.utterance?.words || message.words; // Adapt to actual structure for word timings
+
                     if(text){
                         setCurrentTranscript(prev => isFinal ? prev + text + " " : text);
-                        if (onTranscript) onTranscript(text, isFinal);
+                        if (onTranscript) onTranscript(text, isFinal, words);
                     }
                 } else if (message.error) { // Or message.type === 'error'
                      console.error("GladiaRt: Error message from WebSocket:", message.error);
@@ -179,7 +186,7 @@ const useGladiaRt = (
         };
 
         ws.onclose = (event) => {
-            //console.log(`GladiaRt: WebSocket disconnected. Code: ${event.code}, Reason: '${event.reason}', Clean: ${event.wasClean}`);
+            console.log(`GladiaRt: WebSocket disconnected. Code: ${event.code}, Reason: '${event.reason}', Clean: ${event.wasClean}`);
             isConnectingRef.current = false;
             if (socketRef.current === ws) { // Ensure this onclose is for the current socket instance
                 socketRef.current = null;
@@ -189,16 +196,16 @@ const useGladiaRt = (
 
             if (componentMountedRef.current && !isSessionExplicitlyStoppedRef.current && event.code !== 1000) {
                 if (event.code === 4408) { // Timeout due to no audio
-                    //console.log("GladiaRt: WS closed due to inactivity (4408). Initiating new session.");
+                    console.log("GladiaRt: WS closed due to inactivity (4408). Initiating new session.");
                     webSocketUrlRef.current = null; // Force new session
                     reconnectAttemptsRef.current = 0; // Reset attempts for new session logic
                     initiateSession();
                 } else {
-                    //console.log("GladiaRt: WS closed unexpectedly, scheduling reconnect.");
+                    console.log("GladiaRt: WS closed unexpectedly, scheduling reconnect.");
                     scheduleReconnect();
                 }
             } else {
-                //console.log("GladiaRt: WS closed (expected or unmounted), no reconnect scheduled.");
+                console.log("GladiaRt: WS closed (expected or unmounted), no reconnect scheduled.");
             }
         };
 
@@ -214,7 +221,7 @@ const useGladiaRt = (
 
     const initiateSession = useCallback(async () => {
         if (isConnectingRef.current || (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) || !componentMountedRef.current) {
-            //console.log(`GladiaRt: Session initiation skipped. Connecting: ${isConnectingRef.current}, SocketOpen: ${socketRef.current?.readyState === WebSocket.OPEN}, Mounted: ${componentMountedRef.current}`);
+            console.log(`GladiaRt: Session initiation skipped. Connecting: ${isConnectingRef.current}, SocketOpen: ${socketRef.current?.readyState === WebSocket.OPEN}, Mounted: ${componentMountedRef.current}`);
             return;
         }
         if(GLADIA_API_KEY === "YOUR_GLADIA_API_KEY_DEFAULT"){
@@ -223,7 +230,7 @@ const useGladiaRt = (
             return;
         }
 
-        //console.log("GladiaRt: Initiating new Gladia session...");
+        console.log("GladiaRt: Initiating new Gladia session...");
         isConnectingRef.current = true;
         isSessionExplicitlyStoppedRef.current = false; // New session attempt means we want it active
         setCurrentTranscript(""); // Reset transcript for new session
@@ -242,7 +249,7 @@ const useGladiaRt = (
             });
 
             if (!componentMountedRef.current) {
-                //console.log("GladiaRt: Unmounted during session fetch. Aborting.");
+                console.log("GladiaRt: Unmounted during session fetch. Aborting.");
                 isConnectingRef.current = false;
                 return;
             }
@@ -265,7 +272,7 @@ const useGladiaRt = (
             }
 
             const sessionData = await response.json() as InitiateResponse;
-            //console.log("GladiaRt: Session initiated. Session ID:", sessionData.id, "WebSocket URL:", sessionData.url ? sessionData.url.split('=')[0]+'=TOKEN_HIDDEN' : 'NO_URL_RECEIVED' + "");
+            console.log("GladiaRt: Session initiated. Session ID:", sessionData.id, "WebSocket URL:", sessionData.url ? sessionData.url.split('=')[0]+'=TOKEN_HIDDEN' : 'NO_URL_RECEIVED' + "");
             
             if (!sessionData.url) {
                  console.error("GladiaRt: CRITICAL - No WebSocket URL in session response.");
@@ -307,18 +314,18 @@ const useGladiaRt = (
         reconnectAttemptsRef.current++;
         const delay = Math.min(RECONNECT_DELAY_BASE_MS * Math.pow(2, reconnectAttemptsRef.current - 1), 30000); // Exponential backoff up to 30s
 
-        //console.log(`GladiaRt: Scheduling reconnect attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS} in ${delay / 1000}s...`);
+        console.log(`GladiaRt: Scheduling reconnect attempt ${reconnectAttemptsRef.current}/${MAX_RECONNECT_ATTEMPTS} in ${delay / 1000}s...`);
         
         clearReconnectTimer();
         reconnectTimeoutRef.current = setTimeout(() => {
             if (componentMountedRef.current && !isSessionExplicitlyStoppedRef.current) {
-                //console.log("GladiaRt: Reconnect timer fired.");
+                console.log("GladiaRt: Reconnect timer fired.");
                 // Strategy: Try existing URL for the first 2 attempts. Then force new session.
                 if (webSocketUrlRef.current && reconnectAttemptsRef.current <= 2) {
-                    //console.log("GladiaRt: Attempting WebSocket reconnect using existing URL.");
+                    console.log("GladiaRt: Attempting WebSocket reconnect using existing URL.");
                     connectWebSocket();
                 } else {
-                    //console.log("GladiaRt: Reached attempt limit for existing URL or no URL, attempting to initiate new session.");
+                    console.log("GladiaRt: Reached attempt limit for existing URL or no URL, attempting to initiate new session.");
                     webSocketUrlRef.current = null; // Ensure new session is fetched
                     // Optionally reset reconnectAttemptsRef here if new session is a full reset of attempts, or let it continue counting.
                     // For now, let it continue, so total attempts (mix of reconnect and re-initiate) are capped.
@@ -330,7 +337,7 @@ const useGladiaRt = (
 
 
     const startSession = useCallback(() => {
-        //console.log("GladiaRt: startSession() called.");
+        console.log("GladiaRt: startSession() called.");
         if (!componentMountedRef.current) {
             console.warn("GladiaRt: startSession called but component not mounted.")
             return;
@@ -340,30 +347,30 @@ const useGladiaRt = (
             if (!isConnectingRef.current) {
                  // If no URL, initiateSession will handle it. If URL exists, connectWebSocket will use it.
                 if (webSocketUrlRef.current) {
-                    //console.log("GladiaRt: startSession - WebSocket URL exists, attempting connectWebSocket.");
+                    console.log("GladiaRt: startSession - WebSocket URL exists, attempting connectWebSocket.");
                     connectWebSocket();
                 } else {
-                    //console.log("GladiaRt: startSession - No WebSocket URL, attempting initiateSession.");
+                    console.log("GladiaRt: startSession - No WebSocket URL, attempting initiateSession.");
                     initiateSession();
                 }
             } else {
-                //console.log("GladiaRt: startSession - Connection attempt already in progress.");
+                console.log("GladiaRt: startSession - Connection attempt already in progress.");
             }
         } else {
-            //console.log(`GladiaRt: startSession - Session/Socket seems active (state: ${socketRef.current?.readyState}).`);
+            console.log(`GladiaRt: startSession - Session/Socket seems active (state: ${socketRef.current?.readyState}).`);
         }
     }, [initiateSession, connectWebSocket]);
 
 
     const stopSession = useCallback((graceful = true) => {
-        //console.log(`GladiaRt: stopSession(${graceful}) called.`);
+        console.log(`GladiaRt: stopSession(${graceful}) called.`);
         isSessionExplicitlyStoppedRef.current = true;
         clearReconnectTimer();
         
         if (socketRef.current) {
             if (socketRef.current.readyState === WebSocket.OPEN) {
                 if (graceful) {
-                    //console.log("GladiaRt: Sending stop_recording message.");
+                    console.log("GladiaRt: Sending stop_recording message.");
                     try {
                         socketRef.current.send(JSON.stringify({ type: "stop_recording" }));
                     } catch(e) {
@@ -378,7 +385,7 @@ const useGladiaRt = (
         webSocketUrlRef.current = null; // Clear URL as session is stopped.
         sessionIdRef.current = null;
         setIsConnected(false); // Reflect disconnected state immediately
-        //console.log("GladiaRt: Session stopped. WebSocket closed and URL cleared.");
+        console.log("GladiaRt: Session stopped. WebSocket closed and URL cleared.");
     }, [clearReconnectTimer, closeExistingSocket]);
 
 
@@ -387,7 +394,7 @@ const useGladiaRt = (
 
         if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
             try {
-                // //console.log("GladiaRt: Sending audio chunk"); // DEBUG
+                // console.log("GladiaRt: Sending audio chunk"); // DEBUG
                 socketRef.current.send(audioData);
             } catch (error) {
                 console.error("GladiaRt: Error sending audio:", error, "---");
@@ -399,7 +406,7 @@ const useGladiaRt = (
             console.warn(`GladiaRt: Cannot send audio. WebSocket not open. State: ${socketRef.current?.readyState}, isConnecting: ${isConnectingRef.current}, isExplicitlyStopped: ${isSessionExplicitlyStoppedRef.current}`);
             // If not connecting and not explicitly stopped, try to start/reconnect
             if(!isConnectingRef.current && !isSessionExplicitlyStoppedRef.current && componentMountedRef.current){
-                //console.log("GladiaRt: Attempting to start session due to sendAudio on closed/non-existent socket");
+                console.log("GladiaRt: Attempting to start session due to sendAudio on closed/non-existent socket");
                 startSession();
             }
         }
@@ -407,12 +414,12 @@ const useGladiaRt = (
 
     useEffect(() => {
         componentMountedRef.current = true;
-        //console.log("GladiaRt: Hook mounted. autoStart:", autoStart, "---");
+        console.log("GladiaRt: Hook mounted. autoStart:", autoStart, "---");
         if (autoStart) {
             startSession();
         }
         return () => {
-            //console.log("GladiaRt: Hook unmounting. Cleaning up...");
+            console.log("GladiaRt: Hook unmounting. Cleaning up...");
             componentMountedRef.current = false;
             stopSession(true); // Graceful stop on unmount
         };
