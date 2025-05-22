@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import { GladiaWordTimestamp } from "../speech/gladia/useGladiaRt";
 import { AylaModelRef, Model, MorphTargetData } from "../character/Ayla";
 
@@ -6,147 +6,110 @@ export interface LipSyncRef {
     proccessLipSyncData: (data: GladiaWordTimestamp[]) => void;
 }
 
-const RESET_LAST_PROCESSED_AUDIO_TIME_DELAY = 3000; // ms
-const DEFAULT_CHAR_DURATION_IF_NO_WORD_DURATION = 75; // ms
-const MIN_CALCULATED_CHAR_DURATION = 30; // ms
-
 export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
 
     const modelRef = useRef<AylaModelRef>(null);
-    const activeTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
-    const lastProcessedAudioEndTimeRef = useRef<number>(0); 
-    const resetLastProcessedAudioEndTimeTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const [timeoutIds, setTimeoutIds] = useState<NodeJS.Timeout[]>([]);
+    const sessionClientStartTimeRef = useRef<number | null>(null); // Müştəri tərəfində sessiyanın başlandığı an (performance.now())
+    const firstWordAudioStartTimeRef = useRef<number | null>(null); // Gladia-dan gələn ilk sözün mütləq başlama vaxtı (ms)
 
     useEffect(() => {
+        // Komponent söküləndə bütün taymerləri təmizlə
         return () => {
-            activeTimeoutsRef.current.forEach(clearTimeout);
-            if (resetLastProcessedAudioEndTimeTimerRef.current) {
-                clearTimeout(resetLastProcessedAudioEndTimeTimerRef.current);
-            }
+            timeoutIds.forEach(clearTimeout);
+            // Sessiya referanslarını da sıfırlamaq olar, əgər komponentin təkrar istifadəsi zamanı yeni sessiya gözlənilirsə
+            // sessionClientStartTimeRef.current = null;
+            // firstWordAudioStartTimeRef.current = null;
         };
-    }, []);
+    }, [timeoutIds]);
 
     const proccessLipSyncData = (data: GladiaWordTimestamp[]) => {
-        console.log("LipSync: proccessLipSyncData called. Received items: ", data.length);
+        console.log("LipSync: proccessLipSyncData called. Received items: ", data.length, "at client time: ", performance.now());
 
-        activeTimeoutsRef.current.forEach(clearTimeout);
-        activeTimeoutsRef.current = [];
+        // Əvvəlki taymerləri təmizlə
+        timeoutIds.forEach(clearTimeout);
+        const newTimeoutIds: NodeJS.Timeout[] = [];
+        const currentClientTimeMs = performance.now();
 
-        if (resetLastProcessedAudioEndTimeTimerRef.current) {
-            clearTimeout(resetLastProcessedAudioEndTimeTimerRef.current);
-            resetLastProcessedAudioEndTimeTimerRef.current = null;
-        }
-
-        if (!data || data.length === 0) {
-            console.log("LipSync: Empty data, setting to neutral and resetting last processed time.");
-            const neutralTargets = getPhonemeTargets('_');
-            modelRef.current?.updateMorphTargets(neutralTargets);
-            lastProcessedAudioEndTimeRef.current = 0;
+        if (data.length === 0) {
+            const resetTargets = getPhonemeTargets('_');
+            modelRef.current?.updateMorphTargets(resetTargets);
+            setTimeoutIds([]);
+            // Sessiya referansları sıfırlanmır, çünki bu, sadəcə müvəqqəti bir fasilə ola bilər
             return;
         }
 
-        let animationScheduleTimeMs = 0; 
-        const firstWordInPacketStartTime = typeof data[0].start === 'number' ? data[0].start : 0;
-
-        if (lastProcessedAudioEndTimeRef.current > 0 && firstWordInPacketStartTime > lastProcessedAudioEndTimeRef.current) {
-            const pauseBetweenPacketsMs = (firstWordInPacketStartTime - lastProcessedAudioEndTimeRef.current) * 1000;
-            animationScheduleTimeMs = pauseBetweenPacketsMs;
-            console.log(`LipSync: ---> Timeout (Pause Between Packets): ${pauseBetweenPacketsMs.toFixed(2)}ms. Animation schedule starts at ${animationScheduleTimeMs.toFixed(2)}ms.`);
-        } else if (lastProcessedAudioEndTimeRef.current > 0 && firstWordInPacketStartTime <= lastProcessedAudioEndTimeRef.current) {
-            console.log(`LipSync: New packet starts (${firstWordInPacketStartTime.toFixed(3)}s) at or before last processed audio end time (${lastProcessedAudioEndTimeRef.current.toFixed(3)}s). Starting animation schedule immediately (0ms).`);
+        // Sessiya başlanğıc referanslarını təyin et (əgər hələ təyin edilməyibsə)
+        if (sessionClientStartTimeRef.current === null || firstWordAudioStartTimeRef.current === null) {
+            sessionClientStartTimeRef.current = currentClientTimeMs;
+            firstWordAudioStartTimeRef.current = data[0].start * 1000; // İlk sözün başlama vaxtı sessiyanın audio başlanğıcıdır
+            console.log(`LipSync: Session started. ClientStartTime: ${sessionClientStartTimeRef.current.toFixed(3)}, FirstWordAudioStartTime: ${firstWordAudioStartTimeRef.current.toFixed(3)}`);
         }
 
-        let latestAudioEndTimeInCurrentPacket = 0;
+        let currentBatchSequentialOffsetMs = 0; // Bu dəstədəki sözlərin ardıcıl animasiyası üçün ofset
 
         for (let wordIndex = 0; wordIndex < data.length; wordIndex++) {
             const wordData = data[wordIndex];
-            let tempOriginalWordText = (wordData.word || "").trim(); // .replaceAll(" ", "_") silindi, boşluqlar filtrasiya ilə həll olunacaq
-            if (wordIndex === data.length - 1) {
-                tempOriginalWordText += "_"; 
-                console.log(`  LipSync: Appended sentence-ending '_' to the last word. New tempOriginalWordText: "${tempOriginalWordText}"`);
-            }
-            const originalWordTextWithMaybeEndingUnderscore = tempOriginalWordText;
-            const wordTextForAnimation = originalWordTextWithMaybeEndingUnderscore.replace(/[^a-zA-Z0-9əƏıİöÖüÜçÇşŞğĞ_]/g, '');
+            const wordPhonemes = wordData.word.trim().toLowerCase();
+            const wordAudioStartTimeMs = wordData.start * 1000;
+            const wordAudioEndTimeMs = wordData.end * 1000;
+            const wordDurationMs = wordAudioEndTimeMs - wordAudioStartTimeMs;
 
-            const wordStartTime = typeof wordData.start === 'number' ? wordData.start : 0;
-            const wordEndTime = typeof wordData.end === 'number' ? wordData.end : wordStartTime;
-
-            if (wordStartTime > latestAudioEndTimeInCurrentPacket) {
-                 latestAudioEndTimeInCurrentPacket = wordStartTime;
-            }
-            if (wordEndTime > latestAudioEndTimeInCurrentPacket) {
-                latestAudioEndTimeInCurrentPacket = wordEndTime;
-            }
-
-            if (!wordTextForAnimation) {
-                console.log(`  LipSync: Word "${originalWordTextWithMaybeEndingUnderscore}" has no animatable characters. Skipping.`);
+            if (wordPhonemes.length === 0 || wordDurationMs <= 0) {
+                console.log("LipSync: Skipping empty or zero-duration word: ", wordData.word);
                 continue;
             }
+
+            const phonemeDurationMs = wordDurationMs / wordPhonemes.length;
+
+            // Sözün audio axınındakı ilk sözə görə nisbi başlama vaxtı
+            const wordAudioStartTimeRelativeToSessionAudioStartMs = wordAudioStartTimeMs - firstWordAudioStartTimeRef.current!;
             
-            // Sözlər arası pauzanı hesabla və animationScheduleTimeMs-i yenilə
-            if (wordIndex > 0) {
-                const prevWordEndTime = typeof data[wordIndex - 1].end === 'number' ? data[wordIndex - 1].end : 0;
-                if (wordStartTime > prevWordEndTime) {
-                    const pauseBetweenWordsMs = (wordStartTime - prevWordEndTime) * 1000;
-                    console.log(`  LipSync: ---> Timeout (Pause Between Words "${(data[wordIndex - 1].word || "").trim()}" and "${originalWordTextWithMaybeEndingUnderscore.replace(/_$/, '')}"): ${pauseBetweenWordsMs.toFixed(2)}ms`);
-                    animationScheduleTimeMs += pauseBetweenWordsMs;
-                }
-            }
-            // İlk söz üçün log (əgər paketlər arası pauza varsa, animationScheduleTimeMs onu göstərəcək)
-            // console.log(`    Word "${originalWordTextWithMaybeEndingUnderscore}" (Word Index: ${wordIndex}): Animation schedule starts at ${animationScheduleTimeMs.toFixed(2)}ms.`);
+            // Sözün müştəri zaman xəttində ideal başlama vaxtı
+            const idealWordStartOnClientTimelineMs = sessionClientStartTimeRef.current! + wordAudioStartTimeRelativeToSessionAudioStartMs;
 
-            const wordDurationMs = Math.max(0, (wordEndTime - wordStartTime) * 1000);
-            const chars = wordTextForAnimation.split('');
-            let durationPerCharMs = DEFAULT_CHAR_DURATION_IF_NO_WORD_DURATION;
+            // İdeal başlama vaxtına qədər olan gecikmə (cari andan etibarən)
+            const delayFromNowToIdealStartMs = Math.max(0, idealWordStartOnClientTimelineMs - currentClientTimeMs);
 
-            if (chars.length > 0 && wordDurationMs > 0) {
-                const calculatedDuration = wordDurationMs / chars.length;
-                durationPerCharMs = Math.max(MIN_CALCULATED_CHAR_DURATION, calculatedDuration);
-            } else if (chars.length > 0 && wordDurationMs <= 0) {
-                 durationPerCharMs = DEFAULT_CHAR_DURATION_IF_NO_WORD_DURATION;
-                 console.log(`      Word "${originalWordTextWithMaybeEndingUnderscore}" has ${wordDurationMs.toFixed(2)}ms audio duration. Using default char animation duration: ${durationPerCharMs}ms`);
-            }
-            
-            console.log(`      Processing "${originalWordTextWithMaybeEndingUnderscore}" (Animates as: "${wordTextForAnimation}"). Scheduled at: ${animationScheduleTimeMs.toFixed(2)}ms, WordAudioDur: ${wordDurationMs.toFixed(2)}ms, Chars: ${chars.length}, AnimCharDur: ${durationPerCharMs.toFixed(2)}ms`);
+            // Bu sözün ilk fonemi üçün effektiv cədvəlləmə gecikməsi
+            // Bu, həm əvvəlki sözlərin bitməsini gözləyir (cari dəstədə), həm də sözün öz ideal vaxtını
+            const effectiveSchedulingDelayForWordMs = Math.max(currentBatchSequentialOffsetMs, delayFromNowToIdealStartMs);
 
-            for (let i = 0; i < chars.length; i++) {
-                const char = chars[i].toLowerCase();
-                const targets = getPhonemeTargets(char);
-                const charScheduledTimeMs = animationScheduleTimeMs + (i * durationPerCharMs);
+            console.log(
+                `LipSync: Word: '${wordData.word}', AudioStartAbs: ${wordAudioStartTimeMs.toFixed(3)}ms, Duration: ${wordDurationMs.toFixed(3)}ms, ` +
+                `IdealClientStart: ${idealWordStartOnClientTimelineMs.toFixed(3)}ms (RelToSessionStart: ${wordAudioStartTimeRelativeToSessionAudioStartMs.toFixed(3)}ms), ` +
+                `CurrentClient: ${currentClientTimeMs.toFixed(3)}ms, DelayToIdeal: ${delayFromNowToIdealStartMs.toFixed(3)}ms, ` +
+                `BatchOffset: ${currentBatchSequentialOffsetMs.toFixed(3)}ms, EffectiveDelay: ${effectiveSchedulingDelayForWordMs.toFixed(3)}ms`
+            );
+
+            for (let phonemeIndex = 0; phonemeIndex < wordPhonemes.length; phonemeIndex++) {
+                const phoneme = wordPhonemes[phonemeIndex];
+                const targets = getPhonemeTargets(phoneme);
+                const phonemeRelativeStartTimeMs = phonemeIndex * phonemeDurationMs;
+                const totalDelayForPhonemeMs = effectiveSchedulingDelayForWordMs + phonemeRelativeStartTimeMs;
 
                 const timeoutId = setTimeout(() => {
-                    console.log(`        Animating '${char}' for "${originalWordTextWithMaybeEndingUnderscore}" at ${new Date().toLocaleTimeString()}. Scheduled: ${charScheduledTimeMs.toFixed(2)}ms`);
+                    const timeSinceSessionStart = (performance.now() - sessionClientStartTimeRef.current!) / 1000;
+                    console.log(`LipSync: [${timeSinceSessionStart.toFixed(3)}s] Updating morphs for phoneme: '${phoneme}' (Word: '${wordData.word}', ScheduledDelay: ${totalDelayForPhonemeMs.toFixed(3)}ms)`);
                     modelRef.current?.updateMorphTargets(targets);
-                }, charScheduledTimeMs);
-                activeTimeoutsRef.current.push(timeoutId);
+                }, totalDelayForPhonemeMs);
+                newTimeoutIds.push(timeoutId);
             }
-            // Növbəti animasiya üçün cədvəl vaxtını artır
-            // Hərflərin cəmi animasiya müddəti qədər artırırıq, çünki sözlər arası pauza ayrıca əlavə olunur.
-            animationScheduleTimeMs += (chars.length * durationPerCharMs); 
+
+            // Söz bitdikdən sonra morfları sıfırlamaq üçün taymer
+            const totalDelayForWordResetMs = effectiveSchedulingDelayForWordMs + wordDurationMs;
+            const resetTimeoutId = setTimeout(() => {
+                const timeSinceSessionStart = (performance.now() - sessionClientStartTimeRef.current!) / 1000;
+                console.log(`LipSync: [${timeSinceSessionStart.toFixed(3)}s] Resetting morphs after word: '${wordData.word}' (ScheduledEndDelay: ${totalDelayForWordResetMs.toFixed(3)}ms)`);
+                const resetTargets = getPhonemeTargets('_');
+                modelRef.current?.updateMorphTargets(resetTargets);
+            }, totalDelayForWordResetMs);
+            newTimeoutIds.push(resetTimeoutId);
+
+            // Növbəti söz üçün batch ofsetini yenilə
+            currentBatchSequentialOffsetMs = effectiveSchedulingDelayForWordMs + wordDurationMs;
         }
-
-        if (latestAudioEndTimeInCurrentPacket > 0) {
-            lastProcessedAudioEndTimeRef.current = latestAudioEndTimeInCurrentPacket;
-            console.log(`LipSync: Updated lastProcessedAudioEndTimeRef to: ${lastProcessedAudioEndTimeRef.current.toFixed(3)}s for the processed packet.`);
-
-            const neutralPoseDelayMs = animationScheduleTimeMs + 100; 
-            const finalTimeoutId = setTimeout(() => {
-                console.log(`LipSync: Packet processed. Setting to neutral pose. Scheduled at: ${neutralPoseDelayMs.toFixed(2)}ms.`);
-                const neutralTargets = getPhonemeTargets('_');
-                modelRef.current?.updateMorphTargets(neutralTargets);
-            }, neutralPoseDelayMs);
-            activeTimeoutsRef.current.push(finalTimeoutId);
-
-            resetLastProcessedAudioEndTimeTimerRef.current = setTimeout(() => {
-                console.log(`LipSync: Resetting lastProcessedAudioEndTimeRef after ${RESET_LAST_PROCESSED_AUDIO_TIME_DELAY}ms of inactivity.`);
-                lastProcessedAudioEndTimeRef.current = 0;
-                resetLastProcessedAudioEndTimeTimerRef.current = null;
-            }, RESET_LAST_PROCESSED_AUDIO_TIME_DELAY);
-        } else if (data.length > 0) {
-             console.log("LipSync: Data had words, but none were animatable or had valid timings. Setting to neutral.");
-             const neutralTargets = getPhonemeTargets('_');
-             modelRef.current?.updateMorphTargets(neutralTargets);
-        }
+        setTimeoutIds(newTimeoutIds);
     };
 
     React.useImperativeHandle(ref, () => ({
