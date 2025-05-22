@@ -6,123 +6,146 @@ export interface LipSyncRef {
     proccessLipSyncData: (data: GladiaWordTimestamp[]) => void;
 }
 
-const RESET_LAST_END_TIME_DELAY = 3000; // ms
+const RESET_LAST_PROCESSED_AUDIO_TIME_DELAY = 3000; // ms
+const DEFAULT_CHAR_DURATION_IF_NO_WORD_DURATION = 75; // ms
+const MIN_CALCULATED_CHAR_DURATION = 30; // ms
 
 export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
 
     const modelRef = useRef<AylaModelRef>(null);
     const activeTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
-    const lastWordEndTimeRef = useRef<number>(0); // Son sözün mütləq bitmə zamanını saxlayır (saniyə cinsində)
-    const resetLastEndTimeTimerRef = useRef<NodeJS.Timeout | null>(null); // lastWordEndTimeRef-i sıfırlamaq üçün taymer
+    const lastProcessedAudioEndTimeRef = useRef<number>(0); 
+    const resetLastProcessedAudioEndTimeTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     useEffect(() => {
         return () => {
             activeTimeoutsRef.current.forEach(clearTimeout);
-            if (resetLastEndTimeTimerRef.current) {
-                clearTimeout(resetLastEndTimeTimerRef.current);
+            if (resetLastProcessedAudioEndTimeTimerRef.current) {
+                clearTimeout(resetLastProcessedAudioEndTimeTimerRef.current);
             }
         };
     }, []);
 
     const proccessLipSyncData = (data: GladiaWordTimestamp[]) => {
-        console.log("LipSync proccessLipSyncData with data: ", JSON.stringify(data, null, 2));
+        console.log("LipSync: proccessLipSyncData called. Received items: ", data.length);
 
         activeTimeoutsRef.current.forEach(clearTimeout);
         activeTimeoutsRef.current = [];
 
-        if (resetLastEndTimeTimerRef.current) {
-            clearTimeout(resetLastEndTimeTimerRef.current);
-            resetLastEndTimeTimerRef.current = null;
+        if (resetLastProcessedAudioEndTimeTimerRef.current) {
+            clearTimeout(resetLastProcessedAudioEndTimeTimerRef.current);
+            resetLastProcessedAudioEndTimeTimerRef.current = null;
         }
 
         if (!data || data.length === 0) {
-            console.log("LipSync: Empty data received, setting to neutral and resetting last end time.");
+            console.log("LipSync: Empty data, setting to neutral and resetting last processed time.");
             const neutralTargets = getPhonemeTargets('_');
             modelRef.current?.updateMorphTargets(neutralTargets);
-            lastWordEndTimeRef.current = 0; // Heç bir söz emal olunmadığı üçün sıfırla
+            lastProcessedAudioEndTimeRef.current = 0;
             return;
         }
 
-        let overallDelay = 0; // Bütün animasiyalar üçün ümumi başlanğıc gecikməsi (ms)
-        const firstWordOfPacket = data[0];
+        let animationScheduleTimeMs = 0; 
+        const firstWordInPacketStartTime = typeof data[0].start === 'number' ? data[0].start : 0;
 
-        if (lastWordEndTimeRef.current > 0 && firstWordOfPacket.start_time > lastWordEndTimeRef.current) {
-            const pauseBetweenPackets = (firstWordOfPacket.start_time - lastWordEndTimeRef.current) * 1000;
-            overallDelay += pauseBetweenPackets;
-            console.log(`LipSync: Pause between packets detected: ${pauseBetweenPackets.toFixed(2)}ms`);
+        if (lastProcessedAudioEndTimeRef.current > 0 && firstWordInPacketStartTime > lastProcessedAudioEndTimeRef.current) {
+            const pauseBetweenPacketsMs = (firstWordInPacketStartTime - lastProcessedAudioEndTimeRef.current) * 1000;
+            animationScheduleTimeMs = pauseBetweenPacketsMs;
+            console.log(`LipSync: ---> Timeout (Pause Between Packets): ${pauseBetweenPacketsMs.toFixed(2)}ms. Animation schedule starts at ${animationScheduleTimeMs.toFixed(2)}ms.`);
+        } else if (lastProcessedAudioEndTimeRef.current > 0 && firstWordInPacketStartTime <= lastProcessedAudioEndTimeRef.current) {
+            console.log(`LipSync: New packet starts (${firstWordInPacketStartTime.toFixed(3)}s) at or before last processed audio end time (${lastProcessedAudioEndTimeRef.current.toFixed(3)}s). Starting animation schedule immediately (0ms).`);
         }
 
-        let currentLastEndTime = lastWordEndTimeRef.current; // Bu paket daxilində son sözün bitmə zamanı
+        let latestAudioEndTimeInCurrentPacket = 0;
 
         for (let wordIndex = 0; wordIndex < data.length; wordIndex++) {
             const wordData = data[wordIndex];
-            const wordText = wordData.word.trim();
-            if (!wordText) continue;
+            let tempOriginalWordText = (wordData.word || "").trim(); // .replaceAll(" ", "_") silindi, boşluqlar filtrasiya ilə həll olunacaq
+            if (wordIndex === data.length - 1) {
+                tempOriginalWordText += "_"; 
+                console.log(`  LipSync: Appended sentence-ending '_' to the last word. New tempOriginalWordText: "${tempOriginalWordText}"`);
+            }
+            const originalWordTextWithMaybeEndingUnderscore = tempOriginalWordText;
+            const wordTextForAnimation = originalWordTextWithMaybeEndingUnderscore.replace(/[^a-zA-Z0-9əƏıİöÖüÜçÇşŞğĞ_]/g, '');
 
-            let wordStartDelay = overallDelay;
-            if (wordIndex > 0) { // Əgər ilk söz deyilsə, əvvəlki sözlə arasındakı pauzanı hesablayırıq
-                const prevWordEndTime = data[wordIndex - 1].end_time;
-                if (wordData.start_time > prevWordEndTime) {
-                    const pauseBetweenWords = (wordData.start_time - prevWordEndTime) * 1000;
-                    wordStartDelay += pauseBetweenWords;
-                     console.log(`  LipSync: Pause between "${data[wordIndex-1].word.trim()}" and "${wordText}": ${pauseBetweenWords.toFixed(2)}ms added to overallDelay. New overallDelay for this word: ${wordStartDelay.toFixed(2)}ms`);
-                }
-            } else { // Paketin ilk sözü üçün
-                 // overallDelay artıq paketlər arası pauzanı (əgər varsa) ehtiva edir.
-                 // Əgər lastWordEndTimeRef.current > wordData.start_time isə, bu, üst-üstə düşmə deməkdir.
-                 // Bu halda, animasiyanı dərhal (və ya çox kiçik bir gecikmə ilə) başlatmaq istəyə bilərik.
-                 // Hazırkı məntiqdə, əgər üst-üstə düşmə varsa, overallDelay olduğu kimi qalır (potensial olaraq mənfi və ya sıfır).
-                 // Biz istəyirik ki, animasiya ən azı sıfırıncı saniyədə başlasın (əvvəlki `activeTimeoutsRef` təmizləndiyi üçün).
-                 // Bu, bir az daha düşünülməlidir. Ən sadə halda, `overallDelay` `firstWordOfPacket.start_time * 1000`-dən başlamalıdır.
-                 // Amma `lastWordEndTimeRef` ilə müqayisə daha doğrudur.
-                 // Hələlik, `overallDelay` hesablamasını yuxarıdakı kimi saxlayaq.
-                 console.log(`  LipSync: First word "${wordText}" in packet. Initial overallDelay for this word: ${wordStartDelay.toFixed(2)}ms`);
+            const wordStartTime = typeof wordData.start === 'number' ? wordData.start : 0;
+            const wordEndTime = typeof wordData.end === 'number' ? wordData.end : wordStartTime;
+
+            if (wordStartTime > latestAudioEndTimeInCurrentPacket) {
+                 latestAudioEndTimeInCurrentPacket = wordStartTime;
+            }
+            if (wordEndTime > latestAudioEndTimeInCurrentPacket) {
+                latestAudioEndTimeInCurrentPacket = wordEndTime;
             }
 
+            if (!wordTextForAnimation) {
+                console.log(`  LipSync: Word "${originalWordTextWithMaybeEndingUnderscore}" has no animatable characters. Skipping.`);
+                continue;
+            }
+            
+            // Sözlər arası pauzanı hesabla və animationScheduleTimeMs-i yenilə
+            if (wordIndex > 0) {
+                const prevWordEndTime = typeof data[wordIndex - 1].end === 'number' ? data[wordIndex - 1].end : 0;
+                if (wordStartTime > prevWordEndTime) {
+                    const pauseBetweenWordsMs = (wordStartTime - prevWordEndTime) * 1000;
+                    console.log(`  LipSync: ---> Timeout (Pause Between Words "${(data[wordIndex - 1].word || "").trim()}" and "${originalWordTextWithMaybeEndingUnderscore.replace(/_$/, '')}"): ${pauseBetweenWordsMs.toFixed(2)}ms`);
+                    animationScheduleTimeMs += pauseBetweenWordsMs;
+                }
+            }
+            // İlk söz üçün log (əgər paketlər arası pauza varsa, animationScheduleTimeMs onu göstərəcək)
+            // console.log(`    Word "${originalWordTextWithMaybeEndingUnderscore}" (Word Index: ${wordIndex}): Animation schedule starts at ${animationScheduleTimeMs.toFixed(2)}ms.`);
 
-            const wordDuration = (wordData.end_time - wordData.start_time) * 1000; // ms
-            const chars = wordText.split('');
-            const durationPerChar = (chars.length > 0 && wordDuration > 0) ? (wordDuration / chars.length) : (chars.length > 0 ? 50 : 0);
+            const wordDurationMs = Math.max(0, (wordEndTime - wordStartTime) * 1000);
+            const chars = wordTextForAnimation.split('');
+            let durationPerCharMs = DEFAULT_CHAR_DURATION_IF_NO_WORD_DURATION;
 
-            console.log(`  Processing word: "${wordText}", Relative Start: ${wordStartDelay.toFixed(2)}ms, Duration: ${wordDuration.toFixed(2)}ms, Chars: ${chars.length}, Duration/Char: ${durationPerChar.toFixed(2)}ms`);
+            if (chars.length > 0 && wordDurationMs > 0) {
+                const calculatedDuration = wordDurationMs / chars.length;
+                durationPerCharMs = Math.max(MIN_CALCULATED_CHAR_DURATION, calculatedDuration);
+            } else if (chars.length > 0 && wordDurationMs <= 0) {
+                 durationPerCharMs = DEFAULT_CHAR_DURATION_IF_NO_WORD_DURATION;
+                 console.log(`      Word "${originalWordTextWithMaybeEndingUnderscore}" has ${wordDurationMs.toFixed(2)}ms audio duration. Using default char animation duration: ${durationPerCharMs}ms`);
+            }
+            
+            console.log(`      Processing "${originalWordTextWithMaybeEndingUnderscore}" (Animates as: "${wordTextForAnimation}"). Scheduled at: ${animationScheduleTimeMs.toFixed(2)}ms, WordAudioDur: ${wordDurationMs.toFixed(2)}ms, Chars: ${chars.length}, AnimCharDur: ${durationPerCharMs.toFixed(2)}ms`);
 
             for (let i = 0; i < chars.length; i++) {
                 const char = chars[i].toLowerCase();
                 const targets = getPhonemeTargets(char);
-                const charDelay = wordStartDelay + (i * durationPerChar);
+                const charScheduledTimeMs = animationScheduleTimeMs + (i * durationPerCharMs);
 
                 const timeoutId = setTimeout(() => {
-                    console.log(`    Animating char: '${char}' for "${wordText}" at ${new Date().toLocaleTimeString()}. Targets:`, JSON.stringify(targets));
+                    console.log(`        Animating '${char}' for "${originalWordTextWithMaybeEndingUnderscore}" at ${new Date().toLocaleTimeString()}. Scheduled: ${charScheduledTimeMs.toFixed(2)}ms`);
                     modelRef.current?.updateMorphTargets(targets);
-                }, charDelay);
+                }, charScheduledTimeMs);
                 activeTimeoutsRef.current.push(timeoutId);
             }
-            // Növbəti iterasiyada sözlər arası pauzanı düzgün hesablamaq üçün overallDelay-i cari sözün bitməsinə qədər artırırıq.
-            // Bu, wordStartDelay + wordDuration olmalıdır.
-            overallDelay = wordStartDelay + wordDuration; 
-            currentLastEndTime = wordData.end_time; // Bu paketdəki son sözün bitmə zamanını yenilə
+            // Növbəti animasiya üçün cədvəl vaxtını artır
+            // Hərflərin cəmi animasiya müddəti qədər artırırıq, çünki sözlər arası pauza ayrıca əlavə olunur.
+            animationScheduleTimeMs += (chars.length * durationPerCharMs); 
         }
 
-        // Bütün animasiyalar cədvələ salındıqdan sonra son sözün bitmə zamanını qlobal olaraq yenilə
-        if (data.length > 0) {
-             lastWordEndTimeRef.current = currentLastEndTime; // saniyə cinsində
-             console.log(`LipSync: Updated lastWordEndTimeRef to: ${lastWordEndTimeRef.current.toFixed(3)}s`);
+        if (latestAudioEndTimeInCurrentPacket > 0) {
+            lastProcessedAudioEndTimeRef.current = latestAudioEndTimeInCurrentPacket;
+            console.log(`LipSync: Updated lastProcessedAudioEndTimeRef to: ${lastProcessedAudioEndTimeRef.current.toFixed(3)}s for the processed packet.`);
 
-            // Neytral poza üçün timeout, ən son hərfin animasiyasının bitməsindən sonra olmalıdır.
-            const neutralPoseDelay = overallDelay + 100; // Son hərfdən 100ms sonra
+            const neutralPoseDelayMs = animationScheduleTimeMs + 100; 
             const finalTimeoutId = setTimeout(() => {
-                console.log("All words processed. Setting to neutral pose.");
+                console.log(`LipSync: Packet processed. Setting to neutral pose. Scheduled at: ${neutralPoseDelayMs.toFixed(2)}ms.`);
                 const neutralTargets = getPhonemeTargets('_');
                 modelRef.current?.updateMorphTargets(neutralTargets);
-            }, neutralPoseDelay);
+            }, neutralPoseDelayMs);
             activeTimeoutsRef.current.push(finalTimeoutId);
 
-            // lastWordEndTimeRef-i sıfırlamaq üçün taymer qur
-            resetLastEndTimeTimerRef.current = setTimeout(() => {
-                console.log(`LipSync: Resetting lastWordEndTimeRef after ${RESET_LAST_END_TIME_DELAY}ms of inactivity.`);
-                lastWordEndTimeRef.current = 0;
-                resetLastEndTimeTimerRef.current = null;
-            }, RESET_LAST_END_TIME_DELAY);
+            resetLastProcessedAudioEndTimeTimerRef.current = setTimeout(() => {
+                console.log(`LipSync: Resetting lastProcessedAudioEndTimeRef after ${RESET_LAST_PROCESSED_AUDIO_TIME_DELAY}ms of inactivity.`);
+                lastProcessedAudioEndTimeRef.current = 0;
+                resetLastProcessedAudioEndTimeTimerRef.current = null;
+            }, RESET_LAST_PROCESSED_AUDIO_TIME_DELAY);
+        } else if (data.length > 0) {
+             console.log("LipSync: Data had words, but none were animatable or had valid timings. Setting to neutral.");
+             const neutralTargets = getPhonemeTargets('_');
+             modelRef.current?.updateMorphTargets(neutralTargets);
         }
     };
 
@@ -130,59 +153,59 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
         proccessLipSyncData: proccessLipSyncData,
     }));
 
-    const getPhonemeTargets = (phoneme: string | undefined): MorphTargetData[] => {
-        if (!phoneme) return [];
-        switch (phoneme) {
-            case 'a': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.6" }, { morphTarget: "V_Wide", weight: "0.2" }];
-            case 'ə': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.5" }, { morphTarget: "V_Wide", weight: "0.1" }];
-            case 'i': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.6" }];
-            case 'l': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
-            case 'r': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
-            case 'n': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
-            case 'm': return [{ morphTarget: "V_Explosive", weight: "1" }, { morphTarget: "V_Wide", weight: "0.1" }];
-            case 'e': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.3" }, { morphTarget: "V_Wide", weight: "0.6" }];
-            case 's': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
-            case 't': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
-            case 'd': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
-            case 'k': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }]; 
-            case 'b': return [{ morphTarget: "V_Explosive", weight: "1" }, { morphTarget: "V_Wide", weight: "0.1" }];
-            case 'g': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.2" }]; 
-            case 'y': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.2" }];
-            case 'u': return [{ morphTarget: "V_Tight_O", weight: "1" }];
-            case 'o': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.1" }, { morphTarget: "V_Tight_O", weight: "0.7" }];
-            case 'ç': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.2" }];
-            case 'z': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.2" }];
-            case 'ş': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }];
-            case 'q': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }]; 
-            case 'x': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }]; 
-            case 'v': return [{ morphTarget: "V_Dental_Lip", weight: "1" }];
-            case 'j': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }];
-            case 'ü': return [{ morphTarget: "V_Tight_O", weight: "1" }];
-            case 'ö': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.1" }, { morphTarget: "V_Tight_O", weight: "0.7" }];
-            case 'h': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }];
-            case 'ğ': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }]; 
-            case 'c': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.2" }]; 
-            case 'ı': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.6" }];
-            case 'p': return [{ morphTarget: "V_Explosive", weight: "1" }, { morphTarget: "V_Wide", weight: "0.1" }];
-            case 'f': return [{ morphTarget: "V_Dental_Lip", weight: "1" }, { morphTarget: "V_Wide", weight: "0.1" }];
-            case '_': return [
-                { morphTarget: "Merged_Open_Mouth", weight: "0" }, 
-                { morphTarget: "V_Lip_Open", weight: "0" }, 
-                { morphTarget: "V_Tight_O", weight: "0" }, 
-                { morphTarget: "V_Dental_Lip", weight: "0" }, 
-                { morphTarget: "V_Explosive", weight: "0" }, 
-                { morphTarget: "V_Wide", weight: "0.1" }
-            ];
-            default: return [
-                { morphTarget: "Merged_Open_Mouth", weight: "0" }, 
-                { morphTarget: "V_Lip_Open", weight: "0" }, 
-                { morphTarget: "V_Tight_O", weight: "0" }, 
-                { morphTarget: "V_Dental_Lip", weight: "0" }, 
-                { morphTarget: "V_Explosive", weight: "0" }, 
-                { morphTarget: "V_Wide", weight: "0.1" }
-            ];
-        }
-    };
+  const getPhonemeTargets = (phoneme: string | undefined): MorphTargetData[] => {
+    if (!phoneme) return [{ morphTarget: "Merged_Open_Mouth", weight: "0" }, { morphTarget: "V_Wide", weight: "0.1" }];
+    switch (phoneme) {
+       case 'a': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.6" }, { morphTarget: "V_Wide", weight: "0.2" }];
+       case 'ə': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.5" }, { morphTarget: "V_Wide", weight: "0.1" }];
+       case 'i': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.6" }];
+       case 'l': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
+       case 'r': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
+       case 'n': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
+       case 'm': return [{ morphTarget: "V_Explosive", weight: "1" }, { morphTarget: "V_Wide", weight: "0.1" }];
+       case 'e': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.3" }, { morphTarget: "V_Wide", weight: "0.6" }];
+       case 's': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
+       case 't': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
+       case 'd': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.3" }];
+       case 'k': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }]; 
+       case 'b': return [{ morphTarget: "V_Explosive", weight: "1" }, { morphTarget: "V_Wide", weight: "0.1" }];
+       case 'g': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.2" }]; 
+       case 'y': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.2" }];
+       case 'u': return [{ morphTarget: "V_Tight_O", weight: "1" }];
+       case 'o': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.1" }, { morphTarget: "V_Tight_O", weight: "0.7" }];
+       case 'ç': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.2" }];
+       case 'z': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.2" }];
+       case 'ş': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }];
+       case 'q': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }]; 
+       case 'x': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }]; 
+       case 'v': return [{ morphTarget: "V_Dental_Lip", weight: "1" }];
+       case 'j': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }];
+       case 'ü': return [{ morphTarget: "V_Tight_O", weight: "1" }];
+       case 'ö': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.1" }, { morphTarget: "V_Tight_O", weight: "0.7" }];
+       case 'h': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }];
+       case 'ğ': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.1" }]; 
+       case 'c': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.2" }]; 
+       case 'ı': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.6" }];
+       case 'p': return [{ morphTarget: "V_Explosive", weight: "1" }, { morphTarget: "V_Wide", weight: "0.1" }];
+       case 'f': return [{ morphTarget: "V_Dental_Lip", weight: "1" }, { morphTarget: "V_Wide", weight: "0.1" }];
+       case '_': return [
+        { morphTarget: "Merged_Open_Mouth", weight: "0" }, 
+        { morphTarget: "V_Lip_Open", weight: "0" }, 
+        { morphTarget: "V_Tight_O", weight: "0" }, 
+        { morphTarget: "V_Dental_Lip", weight: "0" }, 
+        { morphTarget: "V_Explosive", weight: "0" }, 
+        { morphTarget: "V_Wide", weight: "0.1" }
+      ];
+      default: return [
+        { morphTarget: "Merged_Open_Mouth", weight: "0" }, 
+        { morphTarget: "V_Lip_Open", weight: "0" }, 
+        { morphTarget: "V_Tight_O", weight: "0" }, 
+        { morphTarget: "V_Dental_Lip", weight: "0" }, 
+        { morphTarget: "V_Explosive", weight: "0" }, 
+        { morphTarget: "V_Wide", weight: "0.1" }
+      ];
+    }
+  };
 
     return (
         <Model 

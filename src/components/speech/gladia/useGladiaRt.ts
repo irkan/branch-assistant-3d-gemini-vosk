@@ -17,8 +17,8 @@ console.log("GladiaRt Hook Loaded. API Key Starts With:", GLADIA_API_KEY.substri
 
 export interface GladiaWordTimestamp {
     word: string;
-    start_time: number;
-    end_time: number;
+    start: number;
+    end: number;
     confidence?: number; // Optional, if provided by API
 }
 

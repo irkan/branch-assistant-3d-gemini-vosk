@@ -24,7 +24,7 @@ export default function LanguageSelector() {
   const [selectedOption, setSelectedOption] = useState<{
     value: string;
     label: string;
-  } | null>(languageOptions[0]);
+  } | null>(languageOptions[1]);
 
   const updateConfig = useCallback(
     (languageCode: string) => {

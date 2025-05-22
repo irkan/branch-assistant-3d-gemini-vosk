@@ -108,7 +108,6 @@ export const Model = forwardRef<AylaModelRef, ThreeElements['group']>((props, re
   
   useImperativeHandle(ref, () => ({
     updateMorphTargets: (targets: MorphTargetData[]) => { // meshName parameter removed
-      console.log("updateMorphTargets: ", targets);
       const targetMeshNames = ['CC_Base_Body_2', 'CC_Base_Body_9'] as const; // Apply to both meshes
 
       targetMeshNames.forEach(meshName => {
