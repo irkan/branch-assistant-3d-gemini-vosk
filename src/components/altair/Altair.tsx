@@ -16,13 +16,13 @@
 import { type FunctionDeclaration, SchemaType } from "@google/generative-ai";
 import { useEffect, useRef, useState, memo } from "react";
 import vegaEmbed from "vega-embed";
-import { useLiveAPIContext } from "../../contexts/LiveAPIContext";
-import { ToolCall, ServerContent } from "../../multimodal-live-types";
-import VoskComponent, { VoskRef } from '../speech/vosk/VoskComponent';
-import SpeechRecognitionComponent, { SpeechRecognitionRef } from '../speech/speech-recognition/SpeechRecognitionComponent';
-import SpeechStreamerComponent, { SpeechStreamerRef } from '../speech/speech-streamer/SpeechStreamerComponent';
-import GladiaRtComponent, { GladiaRtRef } from '../speech/gladia/GladiaRtComponent';
-import { LipSyncRef } from "../lipsync/LipSync";
+import { useLiveAPIContext } from "./../../contexts/LiveAPIContext";
+import { ToolCall, ServerContent } from "./../../multimodal-live-types";
+import VoskComponent, { VoskRef } from './../speech/vosk/VoskComponent';
+import SpeechRecognitionComponent, { SpeechRecognitionRef } from './../speech/speech-recognition/SpeechRecognitionComponent';
+import SpeechStreamerComponent, { SpeechStreamerRef } from './../speech/speech-streamer/SpeechStreamerComponent';
+import GladiaRtComponent, { GladiaRtRef } from './../speech/gladia/GladiaRtComponent';
+import { LipSyncRef } from "./../lipsync/LipSync";
 
 const declaration: FunctionDeclaration = {
   name: "render_altair",
@@ -64,7 +64,7 @@ function AltairComponent({ lipSyncRef }: AltairComponentProps) {
       systemInstruction: {
         parts: [
           {
-            text: 'Sən Azərbaycan Beynəlxalq Bankının virtual asistentisən. Adın Ayladır.',
+            text: 'Sən Azərbaycan Beynəlxalq Bankının virtual asistentisən. Adın Ayladır. Rəqəmləri azərbaycan dilində söylə, səsləndir. ',
           },
         ],
       },

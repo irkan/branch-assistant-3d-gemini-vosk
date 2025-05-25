@@ -21,7 +21,7 @@ import {
 
 export class AudioStreamer {
   public audioQueue: Float32Array[] = [];
-  private isPlaying: boolean = false;
+  public isPlaying: boolean = false;
   private sampleRate: number = 24000;
   private bufferSize: number = 7680;
   private processingBuffer: Float32Array = new Float32Array(0);
@@ -33,7 +33,11 @@ export class AudioStreamer {
   private initialBufferTime: number = 0.1; //0.1 // 100ms initial buffer
   private endOfQueueAudioSource: AudioBufferSourceNode | null = null;
 
+  private readonly AUDIO_PLAYBACK_DELAY_SECONDS = 0.5; // 1.0 Səslənməni 1 saniyə gecikdirmək üçün sabit
+
   public onComplete = () => {};
+  public onAudioStart = (startTime: number) => {};
+  public onAudioProgress = (currentTime: number, isPlaying: boolean) => {};
 
   constructor(public context: AudioContext) {
     this.gainNode = this.context.createGain();
@@ -105,8 +109,12 @@ export class AudioStreamer {
 
     if (!this.isPlaying) {
       this.isPlaying = true;
-      // Initialize scheduledTime only when we start playing
-      this.scheduledTime = this.context.currentTime + this.initialBufferTime;
+      // Initialize scheduledTime only when we start playing, adding the desired delay
+      this.scheduledTime = this.context.currentTime + this.initialBufferTime + this.AUDIO_PLAYBACK_DELAY_SECONDS;
+      
+      // Notify that audio will start at this time
+      this.onAudioStart(this.scheduledTime);
+      
       this.scheduleNextBuffer();
     }
   }
@@ -179,6 +187,9 @@ export class AudioStreamer {
       this.scheduledTime = startTime + audioBuffer.duration;
     }
 
+    // Notify progress during audio playback
+    this.onAudioProgress(this.context.currentTime, this.isPlaying);
+
     if (this.audioQueue.length === 0 && this.processingBuffer.length === 0) {
       if (this.isStreamComplete) {
         this.isPlaying = false;
@@ -215,6 +226,9 @@ export class AudioStreamer {
     this.processingBuffer = new Float32Array(0);
     this.scheduledTime = this.context.currentTime;
 
+    // Notify that audio stopped
+    this.onAudioProgress(this.context.currentTime, false);
+
     if (this.checkInterval) {
       clearInterval(this.checkInterval);
       this.checkInterval = null;
@@ -237,7 +251,8 @@ export class AudioStreamer {
       await this.context.resume();
     }
     this.isStreamComplete = false;
-    this.scheduledTime = this.context.currentTime + this.initialBufferTime;
+    // Apply the delay when resuming as well
+    this.scheduledTime = this.context.currentTime + this.initialBufferTime + this.AUDIO_PLAYBACK_DELAY_SECONDS;
     this.gainNode.gain.setValueAtTime(1, this.context.currentTime);
   }
 

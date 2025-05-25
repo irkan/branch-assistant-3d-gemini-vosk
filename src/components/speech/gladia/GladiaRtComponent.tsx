@@ -45,14 +45,33 @@ const GladiaRtComponent = forwardRef<GladiaRtRef, GladiaRtComponentProps>((
     },
     ref
 ) => {
+    // Sequence nömrəsi və son yenilənmə vaxtını izləmək üçün ref-lər
+    const sequenceNumber = useRef<number>(0);
+    const lastSequenceUpdateTime = useRef<number>(Date.now());
 
     const handleTranscript = useCallback((transcript: string, isFinal: boolean, words?: GladiaWordTimestamp[]) => {
         if (showDebugInfo) {
             console.log(`GladiaRtComponent: Transcript (${isFinal ? 'Final' : 'Partial'}): ${transcript}`);
             if (words && words.length > 0) {
                 console.log("GladiaRtComponent: Word Timestamps (JSON):", JSON.stringify(words, null, 2));
+                
                 if (lipSyncRef && lipSyncRef.current) {
-                    lipSyncRef.current.proccessLipSyncData(words);
+                    // İndiki vaxtı yoxla
+                    const currentTime = Date.now();
+                    
+                    // Əgər son yeniləmədən 2 saniyə keçibsə, sequence nömrəsini artır
+                    if (currentTime - lastSequenceUpdateTime.current > 4000) {
+                        sequenceNumber.current += 1;
+                        lastSequenceUpdateTime.current = currentTime;
+                        console.log(`GladiaRtComponent: Sequence number updated to ${sequenceNumber.current}`);
+                    } else {
+                        lastSequenceUpdateTime.current = currentTime;
+                        console.log(`GladiaRtComponent: Sequence number not updated, current time: ${currentTime}, last sequence update time: ${lastSequenceUpdateTime.current}`);
+                    }
+                    
+                    // LipSync-ə sözləri və sequence nömrəsini göndər
+                    lipSyncRef.current.proccessLipSyncData(words, sequenceNumber.current);
+                    console.log(`GladiaRtComponent: Sent data to LipSync with sequence ${sequenceNumber.current}`);
                 } else {
                     console.warn("GladiaRtComponent: lipSyncRef is not available to process lip sync data.");
                 }

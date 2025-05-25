@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import { GladiaWordTimestamp } from "../speech/gladia/useGladiaRt";
 import { AylaModelRef, Model, MorphTargetData } from "../character/Ayla";
 
@@ -9,6 +9,7 @@ export interface LipSyncRef {
 const RESET_LAST_PROCESSED_AUDIO_TIME_DELAY = 3000; // ms
 const DEFAULT_CHAR_DURATION_IF_NO_WORD_DURATION = 75; // ms
 const MIN_CALCULATED_CHAR_DURATION = 30; // ms
+const TRANSITION_DURATION = 40; // ms - hərflər arası keçid müddəti
 
 export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
 
@@ -16,6 +17,7 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
     const activeTimeoutsRef = useRef<NodeJS.Timeout[]>([]);
     const lastProcessedAudioEndTimeRef = useRef<number>(0); 
     const resetLastProcessedAudioEndTimeTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const [currentPhoneme, setCurrentPhoneme] = useState<string>('_');
 
     useEffect(() => {
         return () => {
@@ -42,6 +44,7 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
             const neutralTargets = getPhonemeTargets('_');
             modelRef.current?.updateMorphTargets(neutralTargets);
             lastProcessedAudioEndTimeRef.current = 0;
+            setCurrentPhoneme('_');
             return;
         }
 
@@ -52,6 +55,16 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
             const pauseBetweenPacketsMs = (firstWordInPacketStartTime - lastProcessedAudioEndTimeRef.current) * 1000;
             animationScheduleTimeMs = pauseBetweenPacketsMs;
             console.log(`LipSync: ---> Timeout (Pause Between Packets): ${pauseBetweenPacketsMs.toFixed(2)}ms. Animation schedule starts at ${animationScheduleTimeMs.toFixed(2)}ms.`);
+            
+            // Paketlər arası boşluq üçün neytral poza keçiş
+            if (pauseBetweenPacketsMs > 300) { // 300ms-dən çox boşluq varsa neytral poza keçirik
+                const neutralTimeoutId = setTimeout(() => {
+                    const neutralTargets = getPhonemeTargets('_');
+                    modelRef.current?.updateMorphTargets(neutralTargets);
+                    setCurrentPhoneme('_');
+                }, 150); // Keçmiş paketdən 150ms sonra neytral pozaya keçir
+                activeTimeoutsRef.current.push(neutralTimeoutId);
+            }
         } else if (lastProcessedAudioEndTimeRef.current > 0 && firstWordInPacketStartTime <= lastProcessedAudioEndTimeRef.current) {
             console.log(`LipSync: New packet starts (${firstWordInPacketStartTime.toFixed(3)}s) at or before last processed audio end time (${lastProcessedAudioEndTimeRef.current.toFixed(3)}s). Starting animation schedule immediately (0ms).`);
         }
@@ -60,7 +73,7 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
 
         for (let wordIndex = 0; wordIndex < data.length; wordIndex++) {
             const wordData = data[wordIndex];
-            let tempOriginalWordText = (wordData.word || "").trim(); // .replaceAll(" ", "_") silindi, boşluqlar filtrasiya ilə həll olunacaq
+            let tempOriginalWordText = (wordData.word || "").trim(); 
             if (wordIndex === data.length - 1) {
                 tempOriginalWordText += "_"; 
                 console.log(`  LipSync: Appended sentence-ending '_' to the last word. New tempOriginalWordText: "${tempOriginalWordText}"`);
@@ -70,6 +83,7 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
 
             const wordStartTime = typeof wordData.start === 'number' ? wordData.start : 0;
             const wordEndTime = typeof wordData.end === 'number' ? wordData.end : wordStartTime;
+            const wordConfidence = typeof wordData.confidence === 'number' ? wordData.confidence : 0.5;
 
             if (wordStartTime > latestAudioEndTimeInCurrentPacket) {
                  latestAudioEndTimeInCurrentPacket = wordStartTime;
@@ -89,18 +103,29 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
                 if (wordStartTime > prevWordEndTime) {
                     const pauseBetweenWordsMs = (wordStartTime - prevWordEndTime) * 1000;
                     console.log(`  LipSync: ---> Timeout (Pause Between Words "${(data[wordIndex - 1].word || "").trim()}" and "${originalWordTextWithMaybeEndingUnderscore.replace(/_$/, '')}"): ${pauseBetweenWordsMs.toFixed(2)}ms`);
+                    
+                    // Əgər sözlər arası boşluq böyükdürsə (300ms-dən çox), neytral pozaya keçirik
+                    if (pauseBetweenWordsMs > 300) {
+                        const neutralTimeoutId = setTimeout(() => {
+                            const neutralTargets = getPhonemeTargets('_');
+                            modelRef.current?.updateMorphTargets(neutralTargets);
+                            setCurrentPhoneme('_');
+                            console.log(`  LipSync: Set to neutral during word pause at ${animationScheduleTimeMs + 100}ms`);
+                        }, animationScheduleTimeMs + 100);
+                        activeTimeoutsRef.current.push(neutralTimeoutId);
+                    }
+                    
                     animationScheduleTimeMs += pauseBetweenWordsMs;
                 }
             }
-            // İlk söz üçün log (əgər paketlər arası pauza varsa, animationScheduleTimeMs onu göstərəcək)
-            // console.log(`    Word "${originalWordTextWithMaybeEndingUnderscore}" (Word Index: ${wordIndex}): Animation schedule starts at ${animationScheduleTimeMs.toFixed(2)}ms.`);
 
             const wordDurationMs = Math.max(0, (wordEndTime - wordStartTime) * 1000);
             const chars = wordTextForAnimation.split('');
             let durationPerCharMs = DEFAULT_CHAR_DURATION_IF_NO_WORD_DURATION;
 
             if (chars.length > 0 && wordDurationMs > 0) {
-                const calculatedDuration = wordDurationMs / chars.length;
+                // Hərflər arası keçid müddətini nəzərə alaraq hərf başına düşən müddəti hesabla
+                const calculatedDuration = (wordDurationMs - (TRANSITION_DURATION * (chars.length - 1))) / chars.length;
                 durationPerCharMs = Math.max(MIN_CALCULATED_CHAR_DURATION, calculatedDuration);
             } else if (chars.length > 0 && wordDurationMs <= 0) {
                  durationPerCharMs = DEFAULT_CHAR_DURATION_IF_NO_WORD_DURATION;
@@ -110,20 +135,26 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
             console.log(`      Processing "${originalWordTextWithMaybeEndingUnderscore}" (Animates as: "${wordTextForAnimation}"). Scheduled at: ${animationScheduleTimeMs.toFixed(2)}ms, WordAudioDur: ${wordDurationMs.toFixed(2)}ms, Chars: ${chars.length}, AnimCharDur: ${durationPerCharMs.toFixed(2)}ms`);
 
             for (let i = 0; i < chars.length; i++) {
+                // Hər hərf üçün zamanı hesabla
+                const charScheduledTimeMs = animationScheduleTimeMs + (i * (durationPerCharMs + TRANSITION_DURATION));
                 
-                const charScheduledTimeMs = animationScheduleTimeMs + (i * durationPerCharMs);
-
                 const timeoutId = setTimeout(() => {
                     const char = chars[i].toLowerCase();
-                    const targets = getPhonemeTargets(char);
-                    console.log(`        Animating '${char}' for "${originalWordTextWithMaybeEndingUnderscore}" at ${new Date().toLocaleTimeString()}. Scheduled: ${charScheduledTimeMs.toFixed(2)}ms`);
-                    modelRef.current?.updateMorphTargets(targets);
+                    
+                    // Əgər hazırkı fonem cari fonemdən fərqlidirsə, sadəcə yenilə
+                    if (char !== currentPhoneme) {
+                        const targets = getPhonemeTargets(char);
+                        console.log(`        Animating '${char}' for "${originalWordTextWithMaybeEndingUnderscore}" at ${new Date().toLocaleTimeString()}. Scheduled: ${charScheduledTimeMs.toFixed(2)}ms`);
+                        modelRef.current?.updateMorphTargets(targets);
+                        setCurrentPhoneme(char);
+                    }
                 }, charScheduledTimeMs);
                 activeTimeoutsRef.current.push(timeoutId);
             }
+            
             // Növbəti animasiya üçün cədvəl vaxtını artır
-            // Hərflərin cəmi animasiya müddəti qədər artırırıq, çünki sözlər arası pauza ayrıca əlavə olunur.
-            animationScheduleTimeMs += (chars.length * durationPerCharMs); 
+            // Hərflərin cəmi animasiya müddəti və keçid müddətlərini nəzərə alaraq artırırıq
+            animationScheduleTimeMs += (chars.length * durationPerCharMs) + ((chars.length - 1) * TRANSITION_DURATION); 
         }
 
         if (latestAudioEndTimeInCurrentPacket > 0) {
@@ -135,6 +166,7 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
                 console.log(`LipSync: Packet processed. Setting to neutral pose. Scheduled at: ${neutralPoseDelayMs.toFixed(2)}ms.`);
                 const neutralTargets = getPhonemeTargets('_');
                 modelRef.current?.updateMorphTargets(neutralTargets);
+                setCurrentPhoneme('_');
             }, neutralPoseDelayMs);
             activeTimeoutsRef.current.push(finalTimeoutId);
 
@@ -147,6 +179,7 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
              console.log("LipSync: Data had words, but none were animatable or had valid timings. Setting to neutral.");
              const neutralTargets = getPhonemeTargets('_');
              modelRef.current?.updateMorphTargets(neutralTargets);
+             setCurrentPhoneme('_');
         }
     };
 

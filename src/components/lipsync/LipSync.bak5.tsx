@@ -11,8 +11,6 @@ interface PhonemeItem {
     phoneme: string;
     duration: number;
     session: number;
-    start: number;
-    end: number;
 }
 
 export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
@@ -51,14 +49,13 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
     }, []);
 
     const proccessLipSyncData = (data: GladiaWordTimestamp[], sequenceNumber: number = 0) => {
-        // console.log(`LipSync: Processing new word data with sequence ${sequenceNumber}:`, data);
-        const gapDuration = 35;
+        console.log(`LipSync: Processing new word data with sequence ${sequenceNumber}:`, data);
         
         // Növbədə element var və son elementin session ID-si gələn session ID-dən fərqlidirsə
         if (phonemeQueue.current.length > 0 && 
             phonemeQueue.current[phonemeQueue.current.length - 1].session !== sequenceNumber) {
             
-            // console.log(`LipSync: Session changed from ${phonemeQueue.current[phonemeQueue.current.length - 1].session} to ${sequenceNumber}, clearing queue`);
+            console.log(`LipSync: Session changed from ${phonemeQueue.current[phonemeQueue.current.length - 1].session} to ${sequenceNumber}, clearing queue`);
             
             // Növbəni təmizlə
             phonemeQueue.current = [];
@@ -73,147 +70,47 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
         
         // Hər söz üçün analiz et
         data.forEach((wordData, wordIndex) => {
-            const word = wordData.word.toLowerCase().trim().replace(/[^a-zA-Z0-9əƏıİöÖüÜçÇşŞğĞ]/g, '');
+            const word = wordData.word.trim().replace(/[^a-zA-Z0-9əƏıİöÖüÜçÇşŞğĞ]/g, '');
             if (!word) return;
-
-            // Əgər birinci sozdurse ve növbədə element varsa, sözlər arası boşluq əlavə et
-            if (wordIndex==0 && phonemeQueue.current.length > 0) {
-                // Boşluq üçün "_" fonem əlavə et
-                const start = phonemeQueue.current[phonemeQueue.current.length - 1].end;
-                const end = wordData.start;
-                const charDuration = Math.round((end-start) * 1000)-gapDuration;
-                phonemeQueue.current.push({
-                    id: id.current++,
-                    phoneme: '_',
-                    duration: charDuration,
-                    session: sequenceNumber,
-                    start: start,
-                    end: end
-                });
-                
-                // console.log(`PHONEME: char="_", ID: ${id.current}, duration=${Math.round((end-start) * 1000)}, seq=${sequenceNumber}, start=${start}, end=${end}`);
-            }
             
             // Sözün müddətini hesabla
-            let wordDuration = wordData.end - wordData.start;
-
-            // Əgər növbəti söz varsa, sözlər arası boşluq əlavə et
-            if (wordIndex < data.length-1) {
-                const nextWordData = data[wordIndex + 1];
-                wordDuration = wordDuration + (nextWordData.start - wordData.end);
-            }   
+            const wordDuration = wordData.end - wordData.start;
             
             // Sözü hərflərə parçala
             const chars = word.split('');
             
-            // Hər hərf üçün vaxt hesabla - bütün hərflər üçün eyni müddət
-            const originalChars = chars.length;
-            const charDuration = Math.round((wordDuration / originalChars) * 1000)-gapDuration;
+            // Hər hərf üçün vaxt hesabla
+            const charDuration = ((wordDuration / chars.length) * 1000)-27;
             
-            // console.log(`Word "${word}" has ${originalChars} chars, each with duration: ${charDuration}ms`);
-            
-            // Sait səsləri və samit səsləri müəyyən et
-            const vowels = ['a', 'e', 'ə', 'i', 'ı', 'o', 'ö', 'u', 'ü'];
-            const consonantsToRemove = ['r', 'n', 's', 't', 'd', 'k', 'g', 'y', 'ç', 'z', 'ş', 'q', 'x', 'j', 'h', 'ğ', 'c', 'l'];
-            
-            // Sözü hərflərə ayır və yalnız istədiyimiz hərfləri saxla
-            const filteredChars: {char: string, duration: number, originalIndex: number}[] = [];
-            
-            // Səslərin emal edilib-edilmədiyini izləmək üçün
-            const processedIndices = new Set<number>();
-            
-            // Əvvəlcə sait səsləri taparaq onları və ətrafındakıları emal et
-            for (let i = 0; i < chars.length; i++) {
-                if (processedIndices.has(i)) continue; // Bu indeks artıq emal edilib
-                
-                const char = chars[i].toLowerCase();
-                
-                // Əgər saitdirsə
-                if (vowels.includes(char)) {
-                    processedIndices.add(i); // Saiti emal edilmiş kimi qeyd et
-                    
-                    // Hər sait öz müddətinə sahibdir
-                    let vowelDuration = charDuration;
-                    let consonantsBefore = [];
-                    let consonantsAfter = [];
-                    
-                    // Saitdən əvvəlki 1 samiti yoxla
-                    if (i > 0 && !processedIndices.has(i-1)) {
-                        const prevChar = chars[i-1].toLowerCase();
-                        if (consonantsToRemove.includes(prevChar)) {
-                            consonantsBefore.push(i-1);
-                            vowelDuration += charDuration; // Əvvəlki samitin müddətini əlavə et
-                            processedIndices.add(i-1); // Bu samiti emal edilmiş kimi qeyd et
-                        }
-                    }
-                    
-                    // Saitdən sonrakı 2 səsi yoxla
-                    for (let j = 1; j <= 2; j++) {
-                        if (i+j < chars.length && !processedIndices.has(i+j)) {
-                            const nextChar = chars[i+j].toLowerCase();
-                            
-                            // Əgər samitdirsə
-                            if (consonantsToRemove.includes(nextChar)) {
-                                // Əgər bu sonrakı sait deyilsə və ya sonuncu samitdirsə
-                                if (j === 2 || !vowels.includes(chars[i+j+1]?.toLowerCase())) {
-                                    consonantsAfter.push(i+j);
-                                    vowelDuration += charDuration; // Sonrakı samitin müddətini əlavə et
-                                    processedIndices.add(i+j); // Bu samiti emal edilmiş kimi qeyd et
-                                }
-                            } 
-                            // Əgər saitdirsə, sonrakı samitləri yoxlamağı dayandır
-                            else if (vowels.includes(nextChar)) {
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // Sait və onun hesablanmış müddətini filteredChars-a əlavə et
-                    filteredChars.push({char: char, duration: vowelDuration, originalIndex: i});
-                }
-            }
-            
-            // İndi də emal edilməmiş hərfləri əlavə et
-            for (let i = 0; i < chars.length; i++) {
-                if (!processedIndices.has(i)) {
-                    const char = chars[i].toLowerCase();
-                    
-                    // Əgər emal edilməmiş samitdirsə və silinməməlidirsə, əlavə et
-                    if (!consonantsToRemove.includes(char)) {
-                        filteredChars.push({char: char, duration: charDuration, originalIndex: i});
-                        processedIndices.add(i);
-                    }
-                }
-            }
-            
-            // Filteredchars-ı sözün orijinal sırasına görə sırala
-            filteredChars.sort((a, b) => a.originalIndex - b.originalIndex);
-            
-            // Debug məqsədilə, çıxışı yoxla
-            // console.log("Original word:", word);
-            // console.log("Filtered chars:", filteredChars.map(c => c.char).join(""));
-
-            // Filteredchars-ı istifadə edərək fonemləri əlavə et
-
-            let start = wordData.start;
-            let end = wordData.end;
-
-            filteredChars.forEach(({char, duration}) => {
+            // Hər hərf üçün fonem əlavə et
+            chars.forEach((char, charIndex) => {
                 // Queue-yə əlavə et
-                end = (start+duration/1000);
                 phonemeQueue.current.push({
                     id: id.current++,
-                    phoneme: char,
-                    duration: duration,
-                    session: sequenceNumber,
-                    start: start,
-                    end: end
+                    phoneme: char.toLowerCase(),
+                    duration: charDuration,
+                    session: sequenceNumber
                 });
                 
-                // console.log(`PHONEME: char="${char}", ID: ${id.current}, duration=${duration.toFixed(3)}, seq=${sequenceNumber}, start=${start}, end=${end}`);
+                console.log(`PHONEME: char="${char.toLowerCase()}", ID: ${id.current}, duration=${charDuration.toFixed(3)}, seq=${sequenceNumber}`);
+            });
             
-                start = end;
-            }); 
+            // Əgər növbəti söz varsa, sözlər arası boşluq əlavə et
+            if (wordIndex < data.length-1) {
+                const nextWordData = data[wordIndex + 1];
+                
+                // Boşluq üçün "_" fonem əlavə et
+                phonemeQueue.current.push({
+                    id: id.current++,
+                    phoneme: '_',
+                    duration: (Math.round((nextWordData.start - wordData.end) * 1000)-27),
+                    session: sequenceNumber
+                });
+                
+                console.log(`PHONEME: char="_", ID: ${id.current}, duration=${(nextWordData.start - wordData.end)}, seq=${sequenceNumber}`);
+           
+            }
+
         });
     };
     
