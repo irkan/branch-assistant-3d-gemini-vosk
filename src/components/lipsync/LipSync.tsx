@@ -22,14 +22,76 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
     const isProcessing = useRef<boolean>(false);
     const timeoutId = useRef<NodeJS.Timeout | null>(null);
     const id = useRef<number>(0);
+    const lastPhoneme = useRef<string>('_');
+    const lastDataTimestamp = useRef<number>(Date.now());
+    const inactivityTimeoutId = useRef<NodeJS.Timeout | null>(null);
+
+    // Ağızı bağlamaq üçün 3 saniyəlik taymer başladır
+    const startInactivityTimer = () => {
+        // Əvvəlki taymeri təmizlə
+        if (inactivityTimeoutId.current) {
+            clearTimeout(inactivityTimeoutId.current);
+            inactivityTimeoutId.current = null;
+        }
+        
+        // Son məlumat vaxtını yenilə
+        lastDataTimestamp.current = Date.now();
+        
+        // 3 saniyə sonra ağızı bağlamaq üçün taymer qur
+        inactivityTimeoutId.current = setTimeout(() => {
+            // Əgər növbə boşdursa və son fonem "_" deyilsə, ağızı bağla
+            if (phonemeQueue.current.length === 0 && lastPhoneme.current !== '_') {
+                console.log("3 seconds of inactivity timeout, closing mouth");
+                
+                // Ağızı bağlamaq üçün boş fonem əlavə et
+                phonemeQueue.current.push({
+                    id: id.current++,
+                    phoneme: "_",
+                    duration: 300, // 300ms müddəti
+                    session: 0,
+                    start: 0,
+                    end: 0
+                });
+            }
+        }, 3000);
+    };
+
     // Növbəni avtomatik izləmək üçün watcher
     useEffect(() => {
+        // İlkin taymeri başlat
+        startInactivityTimer();
+        
         // Asinxron işləyən funksiya
         const checkQueue = () => {
             // Əgər növbədə fonem varsa və emal prosesi işləmirsə
             if (phonemeQueue.current.length > 0 && !isProcessing.current) {
                 isProcessing.current = true;
                 processQueue();
+            }
+            
+            // Əgər növbə boşdursa və son məlumatdan 3 saniyə keçibsə, ağızı bağla
+            const currentTime = Date.now();
+            if (phonemeQueue.current.length === 0 && 
+                currentTime - lastDataTimestamp.current > 3000 && 
+                lastPhoneme.current !== '_') {
+                
+                console.log("3 seconds of inactivity detected, closing mouth");
+                
+                // Ağızı bağlamaq üçün boş fonem əlavə et
+                phonemeQueue.current.push({
+                    id: id.current++,
+                    phoneme: "_",
+                    duration: 300, // 300ms müddəti
+                    session: 0,
+                    start: 0,
+                    end: 0
+                });
+        
+                // Son fonemi yenilə
+                lastPhoneme.current = '_';
+                
+                // Vaxtı yenilə
+                lastDataTimestamp.current = currentTime;
             }
             
             // Daimi olaraq yoxla
@@ -41,18 +103,61 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
         
         // Təmizləmək üçün
         return () => {
-            if (animationFrameId.current) {
-                cancelAnimationFrame(animationFrameId.current);
+        if (animationFrameId.current) {
+            cancelAnimationFrame(animationFrameId.current);
             }
             if (timeoutId.current) {
                 clearTimeout(timeoutId.current);
             }
+            if (inactivityTimeoutId.current) {
+                clearTimeout(inactivityTimeoutId.current);
+        }
         };
     }, []);
+
+    // İki morph target dəsti arasında interpolasiya et
+    const interpolateMorphTargets = (
+        fromPhoneme: string,
+        toPhoneme: string,
+        progress: number
+    ): MorphTargetData[] => {
+        // Başlanğıc və hədəf morph target-lərini al
+        const fromTargets = getPhonemeTargets(fromPhoneme);
+        const toTargets = getPhonemeTargets(toPhoneme);
+        
+        // Bütün morph target adlarını topla
+        const allMorphTargets = new Set<string>();
+        fromTargets.forEach(item => allMorphTargets.add(item.morphTarget));
+        toTargets.forEach(item => allMorphTargets.add(item.morphTarget));
+        
+        // Hər bir morph target üçün interpolasiya edilmiş dəyər hesabla
+        const result: MorphTargetData[] = [];
+        
+        allMorphTargets.forEach(morphTarget => {
+            const fromItem = fromTargets.find(item => item.morphTarget === morphTarget);
+            const toItem = toTargets.find(item => item.morphTarget === morphTarget);
+            
+            const fromWeight = fromItem ? parseFloat(fromItem.weight) : 0;
+            const toWeight = toItem ? parseFloat(toItem.weight) : 0;
+            
+            // Linear interpolasiya
+            const interpolatedWeight = fromWeight + (toWeight - fromWeight) * progress;
+            
+            result.push({
+                morphTarget,
+                weight: interpolatedWeight.toString()
+            });
+        });
+        
+        return result;
+    };
 
     const proccessLipSyncData = (data: GladiaWordTimestamp[], sequenceNumber: number = 0) => {
         // console.log(`LipSync: Processing new word data with sequence ${sequenceNumber}:`, data);
         const gapDuration = 35;
+        
+        // İnaktivlik taymerini yenidən başlat
+        startInactivityTimer();
         
         // Növbədə element var və son elementin session ID-si gələn session ID-dən fərqlidirsə
         if (phonemeQueue.current.length > 0 && 
@@ -71,11 +176,29 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
             }
         }
         
+        // Əgər birinci sozdurse ve növbədə element varsa, sözlər arası boşluq əlavə et
+        if (data.length > 0 && data[0] && phonemeQueue.current.length > 0) {
+            // Boşluq üçün "_" fonem əlavə et
+            const start = phonemeQueue.current[phonemeQueue.current.length - 1].end;
+            const end = data[0].start;
+            const charDuration = Math.round((end-start) * 1000)-gapDuration;
+            phonemeQueue.current.push({
+                id: id.current++,
+                phoneme: '_',
+                duration: charDuration,
+                session: sequenceNumber,
+                start: start,
+                end: end
+            });
+            
+            // console.log(`PHONEME: char="_", ID: ${id.current}, duration=${Math.round((end-start) * 1000)}, seq=${sequenceNumber}, start=${start}, end=${end}`);
+        }
+        
         // Hər söz üçün analiz et
         data.forEach((wordData, wordIndex) => {
             const word = wordData.word.toLowerCase().trim().replace(/[^a-zA-Z0-9əƏıİöÖüÜçÇşŞğĞ]/g, '');
             if (!word) return;
-
+            
             // Əgər birinci sozdurse ve növbədə element varsa, sözlər arası boşluq əlavə et
             if (wordIndex==0 && phonemeQueue.current.length > 0) {
                 // Boşluq üçün "_" fonem əlavə et
@@ -96,7 +219,7 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
             
             // Sözün müddətini hesabla
             let wordDuration = wordData.end - wordData.start;
-
+ 
             // Əgər növbəti söz varsa, sözlər arası boşluq əlavə et
             if (wordIndex < data.length-1) {
                 const nextWordData = data[wordIndex + 1];
@@ -182,8 +305,8 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
                     if (!consonantsToRemove.includes(char)) {
                         filteredChars.push({char: char, duration: charDuration, originalIndex: i});
                         processedIndices.add(i);
-                    }
                 }
+            }
             }
             
             // Filteredchars-ı sözün orijinal sırasına görə sırala
@@ -201,7 +324,7 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
             filteredChars.forEach(({char, duration}) => {
                 // Queue-yə əlavə et
                 end = (start+duration/1000);
-                phonemeQueue.current.push({
+            phonemeQueue.current.push({
                     id: id.current++,
                     phoneme: char,
                     duration: duration,
@@ -224,19 +347,28 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
             isProcessing.current = false;
             return;
         }
-
+        
         const phoneme = phonemeQueue.current.shift();
         if (phoneme) {
-            const targets = getPhonemeTargets(phoneme.phoneme);
-            modelRef.current?.updateMorphTargets(targets);
+            const phonemeDuration = phoneme.duration;
+            const transitionDuration = Math.min(Math.max(phonemeDuration / 3, 25), 75);
+            
+            // Transition mərhələsini başlat
+            applyTransition(lastPhoneme.current, phoneme.phoneme, transitionDuration);
+            
+            // Sonra qalan müddət üçün tam morph target tətbiq et
+            setTimeout(() => {
+                const targets = getPhonemeTargets(phoneme.phoneme);
+                modelRef.current?.updateMorphTargets(targets);
+                
+                // Cari fonemi yadda saxla
+                lastPhoneme.current = phoneme.phoneme;
+            }, transitionDuration);
+            
+            console.log(`PROCESSED: char="${phoneme.phoneme}", ID: ${phoneme.id}, duration=${phoneme.duration.toFixed(3)}, seq=${phoneme.session}, transition: ${transitionDuration.toFixed(0)}ms`);
         }
         
-        // Console-a yaz
-        if (phoneme) {
-            console.log(`PROCESSED: char="${phoneme.phoneme}", ID: ${phoneme.id}, duration=${phoneme.duration.toFixed(3)}, seq=${phoneme.session}`);
-        }
-        
-        // Növbəti addım üçün 200ms gözlə
+        // Növbəti addım üçün müddəti hesabla
         if (phonemeQueue.current.length > 0) {
             timeoutId.current = setTimeout(() => {
                 processQueue();
@@ -244,6 +376,26 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
         } else {
             console.log("QUEUE_EMPTY");
             isProcessing.current = false;
+        }
+    };
+    
+    // Transition funksiyası
+    const applyTransition = (fromPhoneme: string, toPhoneme: string, duration: number) => {
+        // Neçə addımda keçid etmək lazımdır
+        const steps = 10; // 10 addımda keçid
+        const stepDuration = duration / steps;
+        
+        // Hər addım üçün
+        for (let i = 1; i <= steps; i++) {
+            const progress = i / steps; // 0.1, 0.2, ..., 1.0
+            
+            setTimeout(() => {
+                // Cari progress üçün interpolasiya edilmiş morph target-ləri hesabla
+                const interpolatedTargets = interpolateMorphTargets(fromPhoneme, toPhoneme, progress);
+                
+                // Tətbiq et
+                modelRef.current?.updateMorphTargets(interpolatedTargets);
+            }, stepDuration * i);
         }
     };
 
@@ -254,58 +406,58 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
     const getPhonemeTargets = (phoneme: string | undefined): MorphTargetData[] => {
         if (!phoneme) return [{ morphTarget: "Merged_Open_Mouth", weight: "0" }];
         switch (phoneme) {
-           case 'a': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.4" }];
-           case 'ə': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.5" }];
-           case 'i': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.5" }];
-           //case 'l': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           //case 'r': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           //case 'n': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           case 'm': return [{ morphTarget: "V_Explosive", weight: "1" }];
-           case 'e': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.3" }, { morphTarget: "V_Wide", weight: "0.4" }];
-           //case 's': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           //case 't': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           //case 'd': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           //case 'k': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
-           case 'b': return [{ morphTarget: "V_Explosive", weight: "1" }];
-           //case 'g': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
-           //case 'y': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           case 'u': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.1" }, { morphTarget: "V_Affricate", weight: "1" }, { morphTarget: "V_Tight", weight: "1" }];
-           case 'o': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Affricate", weight: "1" }, { morphTarget: "V_Tight", weight: "1" }];
-           //case 'ç': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           //case 'z': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           //case 'ş': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           //case 'q': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
-           //case 'x': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
-           case 'v': return [{ morphTarget: "V_Dental_Lip", weight: "1" }];
-           //case 'j': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           case 'ü': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.1" }, { morphTarget: "V_Affricate", weight: "1" }, { morphTarget: "V_Tight", weight: "1" }];
-           case 'ö': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Affricate", weight: "1" }, { morphTarget: "V_Tight", weight: "1" }];
-           //case 'h': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
-           //case 'ğ': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
-           //case 'c': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
-           case 'ı': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.6" }];
-           case 'p': return [{ morphTarget: "V_Explosive", weight: "1" }];
-           case 'f': return [{ morphTarget: "V_Dental_Lip", weight: "1" }];
-           case '_': return [
-            { morphTarget: "Merged_Open_Mouth", weight: "0" }, 
-            { morphTarget: "V_Lip_Open", weight: "0" }, 
-            { morphTarget: "V_Tight_O", weight: "0" }, 
-            { morphTarget: "V_Dental_Lip", weight: "0" }, 
-            { morphTarget: "V_Explosive", weight: "0" }, 
-            { morphTarget: "V_Wide", weight: "0" }, 
-            { morphTarget: "V_Affricate", weight: "0" }
-          ];
-          default: return [
-            { morphTarget: "Merged_Open_Mouth", weight: "0" }, 
-            { morphTarget: "V_Lip_Open", weight: "0" }, 
-            { morphTarget: "V_Tight_O", weight: "0" }, 
-            { morphTarget: "V_Dental_Lip", weight: "0" }, 
-            { morphTarget: "V_Explosive", weight: "0" }, 
-            { morphTarget: "V_Wide", weight: "0" }, 
-            { morphTarget: "V_Affricate", weight: "0" }
-          ];
+            case 'a': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.4" }];
+            case 'ə': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.5" }];
+            case 'i': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.5" }];
+            //case 'l': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            //case 'r': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            //case 'n': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            case 'm': return [{ morphTarget: "V_Explosive", weight: "1" }];
+            case 'e': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.3" }, { morphTarget: "V_Wide", weight: "0.4" }];
+            //case 's': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            //case 't': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            //case 'd': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            //case 'k': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
+            case 'b': return [{ morphTarget: "V_Explosive", weight: "1" }];
+            //case 'g': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
+            //case 'y': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            case 'u': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.1" }, { morphTarget: "V_Affricate", weight: "1" }, { morphTarget: "V_Tight", weight: "1" }];
+            case 'o': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Affricate", weight: "1" }, { morphTarget: "V_Tight", weight: "1" }];
+            //case 'ç': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            //case 'z': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            //case 'ş': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            //case 'q': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
+            //case 'x': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
+            case 'v': return [{ morphTarget: "V_Dental_Lip", weight: "1" }];
+            //case 'j': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            case 'ü': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.1" }, { morphTarget: "V_Affricate", weight: "1" }, { morphTarget: "V_Tight", weight: "1" }];
+            case 'ö': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Affricate", weight: "1" }, { morphTarget: "V_Tight", weight: "1" }];
+            //case 'h': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
+            //case 'ğ': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
+            //case 'c': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }]; 
+            case 'ı': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.6" }];
+            case 'p': return [{ morphTarget: "V_Explosive", weight: "1" }];
+            case 'f': return [{ morphTarget: "V_Dental_Lip", weight: "1" }];
+            case '_': return [
+                { morphTarget: "Merged_Open_Mouth", weight: "0" }, 
+                { morphTarget: "V_Lip_Open", weight: "0" }, 
+                { morphTarget: "V_Tight_O", weight: "0" }, 
+                { morphTarget: "V_Dental_Lip", weight: "0" }, 
+                { morphTarget: "V_Explosive", weight: "0" }, 
+             { morphTarget: "V_Wide", weight: "0" }, 
+             { morphTarget: "V_Affricate", weight: "0" }
+            ];
+            default: return [
+                { morphTarget: "Merged_Open_Mouth", weight: "0" }, 
+                { morphTarget: "V_Lip_Open", weight: "0" }, 
+                { morphTarget: "V_Tight_O", weight: "0" }, 
+                { morphTarget: "V_Dental_Lip", weight: "0" }, 
+                { morphTarget: "V_Explosive", weight: "0" }, 
+             { morphTarget: "V_Wide", weight: "0" }, 
+             { morphTarget: "V_Affricate", weight: "0" }
+            ];
         }
-      };
+    };
 
     return (
         <Model 

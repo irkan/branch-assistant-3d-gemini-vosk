@@ -4,8 +4,8 @@ Command: npx gltfjsx@6.5.3 public/model/ayla.glb -o src/components/character/Ayl
 */
 
 import * as THREE from 'three'
-import React, { useEffect, useImperativeHandle, forwardRef } from 'react'
-import { useGraph, ThreeElements } from '@react-three/fiber'
+import React, { useEffect, useImperativeHandle, forwardRef, useState, useRef } from 'react'
+import { useGraph, ThreeElements, useFrame } from '@react-three/fiber'
 import { useGLTF, useAnimations } from '@react-three/drei'
 import { GLTF, SkeletonUtils } from 'three-stdlib'
 
@@ -106,8 +106,106 @@ export const Model = forwardRef<AylaModelRef, ThreeElements['group']>((props, re
   const { nodes, materials } = useGraph(clone) as unknown as Pick<GLTFResult, 'nodes' | 'materials'>
   const { actions } = useAnimations(animations, group)
   
+  // Göz qırpma üçün state'lər
+  const blinkTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const [blinkState, setBlinkState] = useState<'open' | 'closing' | 'closed' | 'opening'>('open')
+  const [blinkProgress, setBlinkProgress] = useState(0)
+  const nextBlinkTimeRef = useRef(0)
+  
+  // Göz qırpmağı planlaşdır
+  const scheduleNextBlink = () => {
+    if (blinkTimeoutRef.current) {
+      clearTimeout(blinkTimeoutRef.current);
+    }
+    
+    // Random olaraq 10-15 saniyə arasında bir göz qırpma
+    const nextBlinkDelay = 10000 + Math.random() * 5000;
+    nextBlinkTimeRef.current = Date.now() + nextBlinkDelay;
+    
+    blinkTimeoutRef.current = setTimeout(() => {
+      // Göz qırpma başlat
+      setBlinkState('closing');
+      setBlinkProgress(0);
+    }, nextBlinkDelay);
+  };
+
+  // Göz qırpma üçün morph targetlərini yeniləmək
+  const updateEyeBlinkMorphs = (weight: number) => {
+    // Göz qapaqları (CC_Base_Body_2) üçün morph target
+    const headMesh = nodes['CC_Base_Body_2'] as THREE.SkinnedMesh;
+    if (headMesh && headMesh.morphTargetDictionary && headMesh.morphTargetInfluences) {
+      // Sol göz
+      const blinkLeftIndex = headMesh.morphTargetDictionary['Eye_Blink_L'];
+      if (blinkLeftIndex !== undefined) {
+        headMesh.morphTargetInfluences[blinkLeftIndex] = weight;
+      }
+      
+      // Sağ göz
+      const blinkRightIndex = headMesh.morphTargetDictionary['Eye_Blink_R'];
+      if (blinkRightIndex !== undefined) {
+        headMesh.morphTargetInfluences[blinkRightIndex] = weight;
+      }
+    }
+    
+    // Kirpiklər (CC_Base_Body_7) üçün morph target
+    const eyelashMesh = nodes['CC_Base_Body_7'] as THREE.SkinnedMesh;
+    if (eyelashMesh && eyelashMesh.morphTargetDictionary && eyelashMesh.morphTargetInfluences) {
+      // Sol kirpik
+      const blinkLeftIndex = eyelashMesh.morphTargetDictionary['Eye_Blink_L'];
+      if (blinkLeftIndex !== undefined) {
+        eyelashMesh.morphTargetInfluences[blinkLeftIndex] = weight;
+      }
+      
+      // Sağ kirpik
+      const blinkRightIndex = eyelashMesh.morphTargetDictionary['Eye_Blink_R'];
+      if (blinkRightIndex !== undefined) {
+        eyelashMesh.morphTargetInfluences[blinkRightIndex] = weight;
+      }
+    }
+  };
+
+  // Hər frame'də göz qırpma animasiyasını yeniləmək üçün
+  useFrame((_, delta) => {
+    // Göz qırpma animasiyası
+    if (blinkState === 'closing') {
+      // Gözü bağlama (0.1 saniyə)
+      setBlinkProgress(blinkProgress + delta * 10);
+      
+      // Transition
+      updateEyeBlinkMorphs(Math.min(blinkProgress, 1));
+      
+      if (blinkProgress >= 1) {
+        setBlinkState('closed');
+        setBlinkProgress(0);
+      }
+    } 
+    else if (blinkState === 'closed') {
+      // Gözün bağlı qalma müddəti (0.05 saniyə)
+      setBlinkProgress(blinkProgress + delta * 20);
+      
+      if (blinkProgress >= 1) {
+        setBlinkState('opening');
+        setBlinkProgress(0);
+      }
+    }
+    else if (blinkState === 'opening') {
+      // Gözü açma (0.15 saniyə)
+      setBlinkProgress(blinkProgress + delta * 6.67);
+      
+      // Transition
+      updateEyeBlinkMorphs(Math.max(1 - blinkProgress, 0));
+      
+      if (blinkProgress >= 1) {
+        setBlinkState('open');
+        setBlinkProgress(0);
+        // Növbəti göz qırpmanı planlaşdır
+        scheduleNextBlink();
+      }
+    }
+  });
+  
   useImperativeHandle(ref, () => ({
-    updateMorphTargets: (targets: MorphTargetData[]) => { // meshName parameter removed
+    updateMorphTargets: (targets: MorphTargetData[]) => {
       const targetMeshNames = ['CC_Base_Body_2', 'CC_Base_Body_9'] as const; // Apply to both meshes
 
       targetMeshNames.forEach(meshName => {
@@ -159,8 +257,14 @@ export const Model = forwardRef<AylaModelRef, ThreeElements['group']>((props, re
       }
     }
     
+    // İlk göz qırpmanı planlaşdır
+    scheduleNextBlink();
+    
     return () => {
       Object.values(actions).forEach(action => action?.fadeOut(0.5))
+      if (blinkTimeoutRef.current) {
+        clearTimeout(blinkTimeoutRef.current);
+      }
     }
   }, [actions])
   
