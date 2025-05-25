@@ -254,14 +254,14 @@ export const LipSync = React.forwardRef<LipSyncRef>((props, ref) => {
     const getPhonemeTargets = (phoneme: string | undefined): MorphTargetData[] => {
         if (!phoneme) return [{ morphTarget: "Merged_Open_Mouth", weight: "0" }];
         switch (phoneme) {
-           case 'a': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.6" }];
+           case 'a': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.4" }];
            case 'ə': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.5" }];
-           case 'i': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.6" }];
+           case 'i': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }, { morphTarget: "V_Wide", weight: "0.5" }];
            //case 'l': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
            //case 'r': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
            //case 'n': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
            case 'm': return [{ morphTarget: "V_Explosive", weight: "1" }];
-           case 'e': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.3" }, { morphTarget: "V_Wide", weight: "0.6" }];
+           case 'e': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.3" }, { morphTarget: "V_Wide", weight: "0.4" }];
            //case 's': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
            //case 't': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
            //case 'd': return [{ morphTarget: "Merged_Open_Mouth", weight: "0.2" }];
